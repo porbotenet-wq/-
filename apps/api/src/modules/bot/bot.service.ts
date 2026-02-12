@@ -81,7 +81,7 @@ export class BotService implements OnModuleInit {
       // Check if user exists
       const { data: existing } = await this.supabase
         .from('users')
-        .select('*, user_roles(*, roles(*))')
+        .select('*, user_roles!user_roles_user_id_fkey(*, roles(*))')
         .eq('telegram_id', from.id)
         .maybeSingle();
 

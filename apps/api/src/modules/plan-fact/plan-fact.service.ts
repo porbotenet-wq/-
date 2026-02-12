@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Decimal } from '@prisma/client/runtime/library';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class PlanFactService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) {}
 
   /**
    * Get daily work logs for a date and optional filters
@@ -54,6 +58,10 @@ export class PlanFactService {
 
     const task = await this.prisma.taskInstance.findUnique({
       where: { id: taskInstanceId },
+      include: {
+        template: true,
+        facade: true,
+      },
     });
     if (!task) throw new NotFoundException(`Task #${taskInstanceId} not found`);
 
@@ -92,6 +100,34 @@ export class PlanFactService {
         newValue: { factDay, date, taskInstanceId },
       },
     });
+
+    const refreshedLog = await this.prisma.dailyWorkLog.findUnique({
+      where: { id: log.id },
+      select: {
+        planDay: true,
+        factDay: true,
+      },
+    });
+
+    if (task && refreshedLog) {
+      try {
+        await this.notificationService.triggerCriticalDeviation({
+          projectId: task.projectId,
+          taskInstanceId,
+          userId,
+          date,
+          planDay: Number(refreshedLog.planDay),
+          factDay: Number(refreshedLog.factDay),
+          taskName: task.template?.name || `Задача #${task.id}`,
+          facadeName: task.facade?.name,
+        });
+      } catch (error) {
+        console.warn(
+          `[PlanFactService] NS-11 notification failed for task #${taskInstanceId}:`,
+          error,
+        );
+      }
+    }
 
     return log;
   }

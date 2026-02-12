@@ -5,10 +5,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TASK_STATUS_TRANSITIONS } from '@stsphera/shared';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class TaskService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) {}
 
   async findAll(params: {
     projectId: number;
@@ -69,7 +73,12 @@ export class TaskService {
   async changeStatus(id: number, newStatus: string, userId: number) {
     const task = await this.prisma.taskInstance.findUnique({
       where: { id },
-      include: { predecessors: { include: { predecessor: true } } },
+      include: {
+        predecessors: { include: { predecessor: true } },
+        template: true,
+        assignee: true,
+        facade: true,
+      },
     });
 
     if (!task) throw new NotFoundException(`Task #${id} not found`);
@@ -122,6 +131,36 @@ export class TaskService {
       },
     });
 
+    if (newStatus === 'DONE') {
+      const assigneeName = task.assignee
+        ? [task.assignee.firstName, task.assignee.lastName]
+            .filter(Boolean)
+            .join(' ')
+        : '—';
+
+      try {
+        await this.notificationService.triggerScenario({
+          code: 'NS-17',
+          projectId: task.projectId,
+          entityType: 'TaskInstance',
+          entityId: task.id,
+          taskInstanceId: task.id,
+          actorUserId: userId,
+          payload: {
+            task_name: task.template?.name || `Задача #${task.id}`,
+            assignee_name: assigneeName || '—',
+            site: task.facade?.name || '—',
+            status: newStatus,
+          },
+        });
+      } catch (error) {
+        console.warn(
+          `[TaskService] NS-17 notification failed for task #${task.id}:`,
+          error,
+        );
+      }
+    }
+
     return updated;
   }
 
@@ -129,7 +168,13 @@ export class TaskService {
    * Assign task to user
    */
   async assign(id: number, assigneeId: number, userId: number) {
-    const task = await this.prisma.taskInstance.findUnique({ where: { id } });
+    const task = await this.prisma.taskInstance.findUnique({
+      where: { id },
+      include: {
+        template: true,
+        facade: true,
+      },
+    });
     if (!task) throw new NotFoundException(`Task #${id} not found`);
 
     const updated = await this.prisma.taskInstance.update({
@@ -150,6 +195,43 @@ export class TaskService {
         newValue: { assigneeId },
       },
     });
+
+    const assignee = await this.prisma.user.findUnique({
+      where: { id: assigneeId },
+      select: {
+        firstName: true,
+        lastName: true,
+      },
+    });
+    const assigneeName = assignee
+      ? [assignee.firstName, assignee.lastName].filter(Boolean).join(' ')
+      : '—';
+    const deadline = task.plannedEnd
+      ? task.plannedEnd.toISOString().slice(0, 10)
+      : '—';
+
+    try {
+      await this.notificationService.triggerScenario({
+        code: 'NS-01',
+        projectId: task.projectId,
+        entityType: 'TaskInstance',
+        entityId: task.id,
+        taskInstanceId: task.id,
+        actorUserId: userId,
+        recipientUserIds: [assigneeId],
+        payload: {
+          task_name: task.template?.name || `Задача #${task.id}`,
+          assignee_name: assigneeName || '—',
+          deadline,
+          site: task.facade?.name || '—',
+        },
+      });
+    } catch (error) {
+      console.warn(
+        `[TaskService] NS-01 notification failed for task #${task.id}:`,
+        error,
+      );
+    }
 
     return updated;
   }

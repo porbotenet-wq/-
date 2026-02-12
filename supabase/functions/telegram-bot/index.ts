@@ -24,6 +24,18 @@ type MiniAppContext = {
   startapp?: string;
 };
 
+type RoleMenuItem = {
+  text: string;
+  callbackData?: string;
+  miniAppContext?: MiniAppContext;
+};
+
+type RoleActionConfig = {
+  message: string;
+  context?: MiniAppContext;
+  handler?: "tasks" | "fact" | "defect" | "summary";
+};
+
 // ===========================
 // Telegram API helpers
 // ===========================
@@ -114,6 +126,328 @@ async function sendMiniAppButton(
     },
   });
 }
+
+function menuCallbackButton(text: string, callbackData: string): RoleMenuItem {
+  return { text, callbackData };
+}
+
+function menuAppButton(text: string, miniAppContext: MiniAppContext): RoleMenuItem {
+  return { text, miniAppContext };
+}
+
+function toInlineKeyboardButton(item: RoleMenuItem) {
+  if (item.miniAppContext) {
+    const appButton = createMiniAppButton(item.text, item.miniAppContext);
+    if (appButton) {
+      return appButton;
+    }
+  }
+
+  return {
+    text: item.text,
+    callback_data: item.callbackData || "open_app",
+  };
+}
+
+function roleMenuRows(roleSystemName: string, isAdmin: boolean): RoleMenuItem[][] {
+  const rowsByRole: Record<string, RoleMenuItem[][]> = {
+    ceo: [
+      [
+        menuCallbackButton("📊 Портфель", "role:portfolio"),
+        menuCallbackButton("⚠️ Риски", "role:risks"),
+      ],
+      [
+        menuCallbackButton("⏳ Просрочки", "role:overdue"),
+        menuCallbackButton("💰 Финансы", "role:finance"),
+      ],
+      [menuCallbackButton("📈 KPI", "role:kpi")],
+    ],
+    direction_director: [
+      [
+        menuCallbackButton("📁 Объекты направления", "role:objects"),
+        menuCallbackButton("📊 План-факт", "role:plan_fact"),
+      ],
+      [
+        menuCallbackButton("📦 Поставка", "role:supply"),
+        menuCallbackButton("👷 Производительность", "role:productivity"),
+      ],
+      [menuCallbackButton("⚠️ Блокеры", "role:blockers")],
+    ],
+    project_director: [
+      [
+        menuCallbackButton("📍 Мой объект", "role:project"),
+        menuCallbackButton("🗓 График", "role:schedule"),
+      ],
+      [
+        menuCallbackButton("📋 Задачи", "my_tasks"),
+        menuCallbackButton("📦 Поставка", "role:delivery"),
+      ],
+      [
+        menuCallbackButton("📝 Акты", "role:acts"),
+        menuCallbackButton("🚨 Проблемы", "role:problems"),
+      ],
+    ],
+    contract_manager: [
+      [
+        menuCallbackButton("📄 Договоры", "role:contracts"),
+        menuCallbackButton("✍️ На подписании", "role:signing"),
+      ],
+      [
+        menuCallbackButton("💰 Этапы оплат", "role:payments"),
+        menuCallbackButton("⚠️ Просрочка контракта", "role:contract_overdue"),
+      ],
+    ],
+    design_manager: [
+      [
+        menuCallbackButton("📐 Проекты", "role:designs"),
+        menuCallbackButton("🔄 На согласовании", "role:on_review"),
+      ],
+      [
+        menuCallbackButton("🧾 Замечания", "role:remarks"),
+        menuCallbackButton("📤 Выдано в работу", "role:issue_work"),
+      ],
+    ],
+    procurement_manager: [
+      [
+        menuCallbackButton("📦 Закупки", "role:procurements"),
+        menuCallbackButton("🚚 В пути", "role:transit"),
+      ],
+      [
+        menuCallbackButton("🏗 Дефицит", "role:deficit"),
+        menuCallbackButton("💰 Согласование счета", "role:invoice"),
+      ],
+    ],
+    foreman: [
+      [
+        menuCallbackButton("📅 План на завтра", "role:plan_tomorrow"),
+        menuCallbackButton("📊 Факт за сегодня", "enter_fact"),
+      ],
+      [
+        menuCallbackButton("👷 Люди", "role:workforce"),
+        menuCallbackButton("📸 Фото", "role:photo"),
+      ],
+      [
+        menuCallbackButton("⚠️ Проблема", "report_defect"),
+        menuCallbackButton("📋 Мои задачи", "my_tasks"),
+      ],
+    ],
+    site_manager: [
+      [
+        menuCallbackButton("👥 Бригады", "role:brigades"),
+        menuCallbackButton("📊 Сводка выработки", "role:output"),
+      ],
+      [
+        menuCallbackButton("⚠️ Отклонения", "role:deviations"),
+        menuCallbackButton("🧭 Перераспределение", "role:reallocate"),
+      ],
+      [menuCallbackButton("📋 Задачи участка", "my_tasks")],
+    ],
+    pto_manager: [
+      [
+        menuCallbackButton("📑 Акты", "role:pto_acts"),
+        menuCallbackButton("📊 Закрытие объемов", "role:pto_close"),
+      ],
+      [
+        menuCallbackButton("🗂 Документы", "role:pto_docs"),
+        menuCallbackButton("⚠️ Несоответствия", "role:pto_mismatch"),
+      ],
+    ],
+  };
+
+  const defaultRows: RoleMenuItem[][] = [
+    [
+      menuCallbackButton("📋 Мои задачи", "my_tasks"),
+      menuCallbackButton("📝 Ввести факт", "enter_fact"),
+    ],
+    [
+      menuCallbackButton("🔴 Дефект", "report_defect"),
+      menuCallbackButton("📊 Сводка", "summary"),
+    ],
+    [
+      menuAppButton("📱 Приложение", {
+        screen: "dashboard",
+        startapp: "dashboard",
+      }),
+    ],
+  ];
+
+  const rows = rowsByRole[roleSystemName]
+    ? rowsByRole[roleSystemName].map((row) => [...row])
+    : defaultRows.map((row) => [...row]);
+
+  if (!rows.flat().some((item) => item.miniAppContext)) {
+    rows.push([
+      menuAppButton("📱 Приложение", {
+        screen: "dashboard",
+        startapp: "dashboard",
+      }),
+    ]);
+  }
+
+  if (isAdmin) {
+    rows.push([menuCallbackButton("🏗 Настроить демо-объект", "setup_demo")]);
+  }
+
+  return rows;
+}
+
+const ROLE_ACTION_MAP: Record<string, RoleActionConfig> = {
+  portfolio: {
+    message: "📊 Портфель проектов:",
+    context: { screen: "dashboard", mode: "portfolio" },
+    handler: "summary",
+  },
+  risks: {
+    message: "⚠️ Риски и блокеры:",
+    context: { screen: "tasks", mode: "risks" },
+  },
+  overdue: {
+    message: "⏳ Просроченные задачи:",
+    context: { screen: "tasks", mode: "overdue" },
+    handler: "summary",
+  },
+  finance: {
+    message: "💰 Финансовая сводка:",
+    context: { screen: "dashboard", mode: "finance" },
+  },
+  kpi: {
+    message: "📈 KPI направлений:",
+    context: { screen: "dashboard", mode: "kpi" },
+  },
+  objects: {
+    message: "📁 Объекты направления:",
+    context: { screen: "project", mode: "objects" },
+  },
+  plan_fact: {
+    message: "📊 План-факт по объемам:",
+    context: { screen: "plan-fact", mode: "plan_fact" },
+  },
+  supply: {
+    message: "📦 Статус поставок:",
+    context: { screen: "modules", mode: "supply" },
+  },
+  productivity: {
+    message: "👷 Производительность бригад:",
+    context: { screen: "plan-fact", mode: "productivity" },
+  },
+  blockers: {
+    message: "⚠️ Активные блокеры:",
+    context: { screen: "tasks", mode: "blockers" },
+  },
+  project: {
+    message: "📍 Карточка объекта:",
+    context: { screen: "project", mode: "project_card" },
+  },
+  schedule: {
+    message: "🗓 График и зависимости:",
+    context: { screen: "tasks", mode: "schedule" },
+  },
+  delivery: {
+    message: "📦 Поставка по объекту:",
+    context: { screen: "modules", mode: "delivery" },
+  },
+  acts: {
+    message: "📝 Акты и закрытие этапов:",
+    context: { screen: "project", mode: "acts" },
+  },
+  problems: {
+    message: "🚨 Проблемы и дефекты:",
+    context: { screen: "tasks", mode: "problems" },
+    handler: "defect",
+  },
+  contracts: {
+    message: "📄 Карточки договоров:",
+    context: { screen: "project", mode: "contracts" },
+  },
+  signing: {
+    message: "✍️ Документы на подписании:",
+    context: { screen: "project", mode: "contract_signing" },
+  },
+  payments: {
+    message: "💰 Этапы оплат:",
+    context: { screen: "dashboard", mode: "payments" },
+  },
+  contract_overdue: {
+    message: "⚠️ Просрочка согласования контрактов:",
+    context: { screen: "project", mode: "contract_overdue" },
+  },
+  designs: {
+    message: "📐 Проектная документация:",
+    context: { screen: "project", mode: "designs" },
+  },
+  on_review: {
+    message: "🔄 Документы на согласовании:",
+    context: { screen: "project", mode: "on_review" },
+  },
+  remarks: {
+    message: "🧾 Замечания и комментарии:",
+    context: { screen: "project", mode: "remarks" },
+  },
+  issue_work: {
+    message: "📤 Выдача в работу:",
+    context: { screen: "tasks", mode: "issue_work" },
+  },
+  procurements: {
+    message: "📦 Закупки:",
+    context: { screen: "modules", mode: "procurements" },
+  },
+  transit: {
+    message: "🚚 Поставки в пути:",
+    context: { screen: "modules", mode: "in_transit" },
+  },
+  deficit: {
+    message: "🏗 Дефицит материалов:",
+    context: { screen: "modules", mode: "deficit" },
+  },
+  invoice: {
+    message: "💰 Счета на согласовании:",
+    context: { screen: "dashboard", mode: "invoice" },
+  },
+  plan_tomorrow: {
+    message: "📅 План на завтра:",
+    context: { screen: "plan-fact", mode: "plan_tomorrow" },
+  },
+  workforce: {
+    message: "👷 Загрузка людей:",
+    context: { screen: "tasks", mode: "workforce" },
+  },
+  photo: {
+    message: "📸 Фотофиксация:",
+    context: { screen: "project", mode: "photo" },
+  },
+  brigades: {
+    message: "👥 Бригады и участки:",
+    context: { screen: "tasks", mode: "brigades" },
+  },
+  output: {
+    message: "📊 Сводка по выработке:",
+    context: { screen: "plan-fact", mode: "output" },
+  },
+  deviations: {
+    message: "⚠️ Отклонения план-факт:",
+    context: { screen: "plan-fact", mode: "deviations" },
+  },
+  reallocate: {
+    message: "🧭 Перераспределение ресурсов:",
+    context: { screen: "tasks", mode: "reallocate" },
+  },
+  pto_acts: {
+    message: "📑 Акты и согласование:",
+    context: { screen: "project", mode: "pto_acts" },
+  },
+  pto_close: {
+    message: "📊 Закрытие объемов:",
+    context: { screen: "plan-fact", mode: "pto_close" },
+  },
+  pto_docs: {
+    message: "🗂 Исполнительная документация:",
+    context: { screen: "project", mode: "pto_docs" },
+  },
+  pto_mismatch: {
+    message: "⚠️ Несоответствия и возвраты:",
+    context: { screen: "tasks", mode: "pto_mismatch" },
+  },
+};
 
 // ===========================
 // Get or create user
@@ -238,32 +572,12 @@ async function handleStart(chatId: number, from: any, startParam?: string) {
   // Active user — main menu
   const role = user.user_roles?.[0]?.roles;
   const roleName = role?.display_name || "Пользователь";
-  const isAdmin = role?.system_name === "admin" || role?.system_name === "project_director";
-
-  const buttons: any[][] = [
-    [
-      { text: "📋 Мои задачи", callback_data: "my_tasks" },
-      { text: "📝 Ввести факт", callback_data: "enter_fact" },
-    ],
-    [
-      { text: "🔴 Дефект", callback_data: "report_defect" },
-      { text: "📊 Сводка", callback_data: "summary" },
-    ],
-  ];
-
-  const miniAppButton = createMiniAppButton("📱 Приложение", { screen: "dashboard" });
-  if (miniAppButton) {
-    buttons.push([miniAppButton]);
-  } else {
-    buttons.push([{ text: "📱 Приложение", callback_data: "open_app" }]);
-  }
-
-  // Admin gets extra buttons
-  if (isAdmin) {
-    buttons.push([
-      { text: "🏗 Настроить демо-объект", callback_data: "setup_demo" },
-    ]);
-  }
+  const roleSystemName = role?.system_name || "viewer";
+  const isAdmin =
+    roleSystemName === "admin" || roleSystemName === "project_director";
+  const buttons = roleMenuRows(roleSystemName, isAdmin).map((row) =>
+    row.map((item) => toInlineKeyboardButton(item)),
+  );
 
   await sendMessage(
     chatId,
@@ -416,6 +730,80 @@ async function handleDefect(chatId: number, from: any) {
   });
 }
 
+async function sendProjectSummary(chatId: number) {
+  const { count: taskCount } = await supabase
+    .from("task_instances")
+    .select("id", { count: "exact", head: true });
+  const { count: overdueCount } = await supabase
+    .from("task_instances")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["ASSIGNED", "IN_PROGRESS"])
+    .lt("planned_end", getTodayIsoDate());
+  const { count: blockedCount } = await supabase
+    .from("task_instances")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "BLOCKED");
+  const { count: facadeCount } = await supabase
+    .from("facades")
+    .select("id", { count: "exact", head: true });
+  const { count: projectCount } = await supabase
+    .from("projects")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "ACTIVE");
+
+  await sendMessage(
+    chatId,
+    `📊 *Сводка STSphera:*\n\n` +
+      `🏗 Активных объектов: ${projectCount || 0}\n` +
+      `📋 Всего задач: ${taskCount || 0}\n` +
+      `⏳ Просрочено: ${overdueCount || 0}\n` +
+      `⚠️ Блокировано: ${blockedCount || 0}\n` +
+      `🏢 Фасадов: ${facadeCount || 0}\n` +
+      `✅ БД: 24 таблицы`,
+  );
+}
+
+function withRoleStartapp(context: MiniAppContext, action: string): MiniAppContext {
+  return {
+    ...context,
+    startapp: context.startapp || `role_${action}`,
+  };
+}
+
+async function handleRoleAction(chatId: number, from: any, action: string) {
+  const user = await getUser(from.id);
+  if (!user || user.status !== "ACTIVE") {
+    await sendMessage(chatId, "Используйте /start для авторизации.");
+    return;
+  }
+
+  const config = ROLE_ACTION_MAP[action];
+  if (!config) {
+    await sendMessage(chatId, "Действие не найдено. Используйте /start.");
+    return;
+  }
+
+  if (config.handler === "tasks") {
+    await handleTasks(chatId, from);
+  } else if (config.handler === "fact") {
+    await handleFact(chatId, from);
+  } else if (config.handler === "defect") {
+    await handleDefect(chatId, from);
+  } else if (config.handler === "summary") {
+    await sendProjectSummary(chatId);
+  }
+
+  if (config.context) {
+    await sendMiniAppButton(
+      chatId,
+      config.message,
+      withRoleStartapp(config.context, action),
+    );
+  } else if (!config.handler) {
+    await sendMessage(chatId, config.message);
+  }
+}
+
 // ===========================
 // Callback handlers
 // ===========================
@@ -442,6 +830,9 @@ async function handleCallback(callbackQuery: any) {
     case "open_app":
       await handleApp(chatId, from, { screen: "dashboard" });
       break;
+    case "role_action":
+      await handleRoleAction(chatId, from, parsedAction.action);
+      break;
     case "fact_select":
       await sendMiniAppButton(
         chatId,
@@ -467,28 +858,7 @@ async function handleCallback(callbackQuery: any) {
       );
       break;
     case "summary": {
-      const { count: taskCount } = await supabase
-        .from("task_instances")
-        .select("id", { count: "exact", head: true });
-      const { count: userCount } = await supabase
-        .from("users")
-        .select("id", { count: "exact", head: true });
-      const { count: rolePermCount } = await supabase
-        .from("role_permissions")
-        .select("id", { count: "exact", head: true });
-      const { count: facadeCount } = await supabase
-        .from("facades")
-        .select("id", { count: "exact", head: true });
-
-      await sendMessage(
-        chatId,
-        `📊 *Сводка СИТИ-4:*\n\n` +
-          `👥 Пользователей: ${userCount}\n` +
-          `📋 Задач: ${taskCount || 0}\n` +
-          `🏢 Фасадов: ${facadeCount || 0}\n` +
-          `🔐 RBAC маппингов: ${rolePermCount}\n` +
-          `✅ БД: 24 таблицы`,
-      );
+      await sendProjectSummary(chatId);
       await sendMiniAppButton(chatId, "Откройте Mini App для детальной аналитики:", {
         screen: "dashboard",
       });

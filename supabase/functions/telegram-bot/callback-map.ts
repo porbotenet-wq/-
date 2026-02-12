@@ -5,6 +5,7 @@ export type ParsedCallbackAction =
   | { type: "open_app" }
   | { type: "summary" }
   | { type: "setup_demo" }
+  | { type: "role_action"; action: string }
   | { type: "fact_select"; taskId: number }
   | { type: "defect_facade"; facadeId: number }
   | { type: "accept_task"; taskId: number }
@@ -29,6 +30,14 @@ export function parseCallbackAction(rawData: string): ParsedCallbackAction {
   if (rawData === "open_app") return { type: "open_app" };
   if (rawData === "summary") return { type: "summary" };
   if (rawData === "setup_demo") return { type: "setup_demo" };
+
+  if (rawData.startsWith("role:")) {
+    const action = rawData.slice("role:".length);
+    if (action) {
+      return { type: "role_action", action };
+    }
+    return { type: "unknown", raw: rawData };
+  }
 
   if (rawData.startsWith("fact_select:")) {
     const taskId = parsePositiveInt(rawData.split(":")[1] || "");

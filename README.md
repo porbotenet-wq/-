@@ -8,6 +8,7 @@ Telegram Bot + Mini App for construction project management.
   - `/app` command opens Mini App
   - Quick actions from callbacks (`fact_select`, `defect_facade`, `view_tasks`, `view_modules`) open Mini App with context (`task_id`, `facade_id`, `date`, `mode`)
 - Mini App parses launch context from `startapp` and URL query params, then navigates to the target screen (`/tasks`, `/plan-fact`, `/modules`, `/project`)
+- Telegram bot main menu is now role-aware for enterprise roles (CEO, direction director, contract/design/procurement/PTO managers, project/site/foreman roles) with action-first callback flows.
 
 ## Documentation
 

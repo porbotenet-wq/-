@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -129,23 +129,31 @@ async function handleStart(chatId: number, from: any) {
   // Active user — main menu
   const role = user.user_roles?.[0]?.roles;
   const roleName = role?.display_name || "Пользователь";
+  const isAdmin = role?.system_name === "admin" || role?.system_name === "project_director";
+
+  const buttons = [
+    [
+      { text: "📋 Мои задачи", callback_data: "my_tasks" },
+      { text: "📝 Ввести факт", callback_data: "enter_fact" },
+    ],
+    [
+      { text: "🔴 Дефект", callback_data: "report_defect" },
+      { text: "📊 Сводка", callback_data: "summary" },
+    ],
+  ];
+
+  // Admin gets extra buttons
+  if (isAdmin) {
+    buttons.push([
+      { text: "🏗 Настроить демо-объект", callback_data: "setup_demo" },
+    ]);
+  }
 
   await sendMessage(
     chatId,
     `🏗 *STSphera — ${roleName}*\n📁 Проект: СИТИ-4\n\nВыберите действие:`,
     {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "📋 Мои задачи", callback_data: "my_tasks" },
-            { text: "📝 Ввести факт", callback_data: "enter_fact" },
-          ],
-          [
-            { text: "🔴 Дефект", callback_data: "report_defect" },
-            { text: "📊 Сводка", callback_data: "summary" },
-          ],
-        ],
-      },
+      reply_markup: { inline_keyboard: buttons },
     }
   );
 }
@@ -313,6 +321,65 @@ async function handleCallback(callbackQuery: any) {
     });
 
     await sendMessage(chatId, "✅ Задача принята в работу!");
+  } else if (data.startsWith("accept_all:")) {
+    const taskIds = data.replace("accept_all:", "").split(",").map(Number);
+    const user = await getUser(from.id);
+    if (!user) return;
+
+    for (const taskId of taskIds) {
+      await supabase
+        .from("task_instances")
+        .update({ status: "IN_PROGRESS", actual_start: new Date().toISOString().split("T")[0] })
+        .eq("id", taskId)
+        .eq("assignee_id", user.id);
+    }
+
+    await supabase.from("audit_logs").insert({
+      action: "TASKS_ACCEPTED_BULK",
+      entity_type: "TaskInstance",
+      user_id: user.id,
+      new_value: { task_ids: taskIds, count: taskIds.length },
+    });
+
+    await sendMessage(chatId, `✅ Принято задач: ${taskIds.length}. Все в работе!`);
+  } else if (data === "setup_demo") {
+    await sendMessage(chatId, "⏳ Настраиваю демо-объект СИТИ-4...\nФасады, задачи, модули...");
+
+    // Call project-workflow function
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/project-workflow`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ action: "setup_demo", userId: from.id }),
+    });
+    
+    const result = await resp.json();
+    
+    if (result.data) {
+      await sendMessage(chatId,
+        `✅ *Демо-объект СИТИ-4 настроен!*\n\n` +
+        `🏢 Фасады: 4\n` +
+        `🔧 Типы работ: 8\n` +
+        `📋 Задач создано: ${result.data.generated || 0}\n` +
+        `👤 Назначено: ${result.data.assigned || 0}\n` +
+        `📦 Модулей: 4\n\n` +
+        `Все отделы уведомлены.`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📋 Мои задачи", callback_data: "my_tasks" },
+               { text: "📊 Сводка", callback_data: "summary" }],
+            ],
+          },
+        }
+      );
+    } else {
+      await sendMessage(chatId, "❌ Ошибка настройки: " + (result.error || "неизвестная"));
+    }
+  } else if (data.startsWith("view_tasks:") || data.startsWith("create_tasks:") || data.startsWith("view_modules:")) {
+    await sendMessage(chatId, "📱 Эта функция доступна в Mini App. Скоро будет доступна.");
   }
 }
 

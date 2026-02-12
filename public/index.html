@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini App</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Mini App</h1>
+      <p id="status">Ready</p>
+
+      <section class="card">
+        <h2>User</h2>
+        <p id="user-name">Unknown user</p>
+      </section>
+
+      <section class="card">
+        <h2>Counter</h2>
+        <p id="counter-value">0</p>
+        <div class="actions">
+          <button id="decrement-btn" type="button">-</button>
+          <button id="increment-btn" type="button">+</button>
+        </div>
+      </section>
+
+      <button id="send-btn" class="primary" type="button">
+        Send data to bot
+      </button>
+    </main>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

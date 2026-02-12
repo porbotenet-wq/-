@@ -1,36 +1,109 @@
 # STSphera
 
-Telegram Bot + Mini App for construction project management.
+Telegram Bot + Mini App для управления строительными проектами.
 
-## Documentation
+## Архитектура
 
-Full product architecture and requirements specification:
+```
+┌─────────────┐     ┌──────────────────┐     ┌────────────────┐
+│  Telegram    │────▶│  Supabase Edge   │────▶│   Supabase     │
+│  Bot Users   │     │  Function (Bot)  │     │   PostgreSQL   │
+└─────────────┘     └──────────────────┘     └────────────────┘
+       │                                            ▲
+       │            ┌──────────────────┐            │
+       └───────────▶│  Mini App        │────────────┘
+                    │  (GitHub Pages)  │
+                    │  React + TailwindCSS
+                    └──────────────────┘
+```
 
-**[docs/architecture/00-index.md](docs/architecture/00-index.md)** — Master index with all 11 sections.
+## Быстрый старт
 
-### Sections
+### 1. Настройка бота
 
-| # | Section | File |
-|---|---------|------|
-| 0 | Index & Self-Check | [00-index.md](docs/architecture/00-index.md) |
-| 1 | Product Architecture | [01-product-architecture.md](docs/architecture/01-product-architecture.md) |
-| 2 | Workflow Logic | [02-workflow-logic.md](docs/architecture/02-workflow-logic.md) |
-| 3 | Task Model | [03-task-model.md](docs/architecture/03-task-model.md) |
-| 4 | RBAC | [04-rbac.md](docs/architecture/04-rbac.md) |
-| 5 | Functional Requirements | [05-functional-requirements.md](docs/architecture/05-functional-requirements.md) |
-| 6 | Data Entities | [06-data-entities.md](docs/architecture/06-data-entities.md) |
-| 7 | Notifications & Escalations | [07-notifications-escalations.md](docs/architecture/07-notifications-escalations.md) |
-| 8 | Technical Stack | [08-technical-stack.md](docs/architecture/08-technical-stack.md) |
-| 9 | Assumptions & Gaps | [09-assumptions-gaps.md](docs/architecture/09-assumptions-gaps.md) |
-| 10 | MVP Scope | [10-mvp-scope-cutline.md](docs/architecture/10-mvp-scope-cutline.md) |
-| 11 | Backlog | [11-backlog.md](docs/architecture/11-backlog.md) |
+```bash
+export TELEGRAM_BOT_TOKEN="your_bot_token_from_BotFather"
+node scripts/setup-bot.mjs
+```
 
-### Key Numbers
+Скрипт автоматически:
+- Установит webhook на Supabase Edge Function
+- Зарегистрирует команды бота (/start, /tasks, /fact, /defect, /menu, /help)
+- Настроит кнопку **STSphera** (Menu Button) — открывает Mini App
 
-- **20** Functional Requirements (REQ-*)
-- **24** Database Entities
-- **18** Notification Scenarios
-- **10** RBAC Roles
-- **12** Epics, **79** Stories
-- **~344** Story Points estimated
-- **Tech Stack**: Node.js + NestJS + TypeScript + React + PostgreSQL + Redis + grammY
+### 2. Включение GitHub Pages (Mini App)
+
+1. Перейдите в **Settings → Pages** репозитория
+2. Source: **Deploy from a branch**
+3. Branch: **gh-pages** → **/ (root)**
+4. Нажмите **Save**
+
+Mini App будет доступен по адресу: `https://porbotenet-wq.github.io/-/`
+
+### 3. Переменные окружения Supabase
+
+В Supabase Dashboard → Edge Functions → Secrets:
+
+| Переменная | Значение |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Токен от @BotFather |
+| `SUPABASE_URL` | URL вашего Supabase проекта |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service Role Key |
+| `MINI_APP_URL` | `https://porbotenet-wq.github.io/-/` |
+
+## Структура проекта
+
+```
+├── apps/
+│   ├── api/                    # NestJS Backend (REST API)
+│   └── mini-app/               # React Mini App (Vite + Tailwind)
+│       ├── src/
+│       │   ├── pages/          # Dashboard, Tasks, PlanFact, Gantt,
+│       │   │                   # Modules, Documents, ProjectInfo
+│       │   ├── components/     # NavBar, StatusBadge
+│       │   ├── stores/         # Zustand store
+│       │   ├── hooks/          # useTelegram hook
+│       │   └── api/            # Supabase client
+│       └── dist/               # Production build
+├── packages/shared/            # Shared constants/enums
+├── supabase/
+│   ├── functions/
+│   │   ├── telegram-bot/       # Bot webhook (Edge Function)
+│   │   └── project-workflow/   # Workflow engine (Edge Function)
+│   └── migrations/             # SQL migrations (24 tables)
+├── scripts/
+│   ├── setup-bot.mjs           # Bot setup script
+│   └── setup-bot.sh            # Bash version
+├── docs/architecture/          # Product docs (11 sections)
+└── .github/workflows/          # Auto-deploy Mini App
+```
+
+## Функциональность
+
+### Telegram Bot
+- `/start` — регистрация + главное меню
+- `/tasks` — список задач с кнопками (принять/завершить)
+- `/fact` — ввод факта (выбор задачи → ввод числа → сохранение)
+- `/defect` — фиксация дефекта (фасад → критичность → описание + фото)
+- `/menu` — главное меню с inline-кнопками
+- Назначение ролей (для админов)
+- Уведомления при назначении задач, просрочках, дефектах
+- Фото-фиксация (сохранение в документы)
+- Deep-link в Mini App
+
+### Mini App (7 экранов)
+- **Дашборд** — KPI, круговые диаграммы задач/модулей, прогресс по фасадам
+- **Задачи** — список + канбан, фильтры (мои/просроченные/фасад/статус), смена статусов
+- **План-Факт** — табличный ввод, автопересчёт отклонений, итоги, отправка на проверку
+- **Диаграмма Ганта** — временная шкала задач, группировка по секциям, прогресс
+- **Модули** — pipeline-вид, продвижение статусов, фильтры
+- **Документы** — загрузка файлов, workflow (черновик → проверка → утверждение)
+- **Объект** — информация о проекте, фасады, команда
+
+## Технологии
+
+- **Bot**: Deno + Supabase Edge Functions
+- **Mini App**: React 18 + TypeScript + Vite + Tailwind CSS + Recharts + Zustand
+- **Database**: Supabase PostgreSQL (24 таблицы)
+- **Hosting**: GitHub Pages (Mini App), Supabase (Bot + DB)
+- **SDK**: Telegram Web App JS SDK

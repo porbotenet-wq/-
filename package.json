@@ -14,6 +14,8 @@
     "db:generate": "npm run db:generate -w apps/api",
     "db:push": "npm run db:push -w apps/api",
     "db:seed": "npm run db:seed -w apps/api",
+    "setup:bot": "node scripts/setup-bot.mjs",
+    "deploy:mini-app": "cd apps/mini-app && npm run build && cd ../.. && cp -r apps/mini-app/dist/* /tmp/gh-pages-deploy/",
     "lint": "npm run lint --workspaces --if-present",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules"
   },

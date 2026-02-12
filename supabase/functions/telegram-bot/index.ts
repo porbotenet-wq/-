@@ -8,7 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
-const MINI_APP_URL = Deno.env.get("MINI_APP_URL") || "https://t.me/STSpheraBot/app";
+const MINI_APP_URL = Deno.env.get("MINI_APP_URL") || "https://porbotenet-wq.github.io/-/";
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {

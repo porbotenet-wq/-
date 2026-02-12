@@ -2,8 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+// GitHub Pages: https://porbotenet-wq.github.io/-/
 export default defineConfig({
   plugins: [react()],
+  base: '/-/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -11,5 +13,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
   },
 });

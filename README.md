@@ -2,6 +2,13 @@
 
 Telegram Bot + Mini App for construction project management.
 
+## Latest update
+
+- Telegram bot now supports contextual Mini App deep-links (REQ-BOT-006):
+  - `/app` command opens Mini App
+  - Quick actions from callbacks (`fact_select`, `defect_facade`, `view_tasks`, `view_modules`) open Mini App with context (`task_id`, `facade_id`, `date`, `mode`)
+- Mini App parses launch context from `startapp` and URL query params, then navigates to the target screen (`/tasks`, `/plan-fact`, `/modules`, `/project`)
+
 ## Documentation
 
 Full product architecture and requirements specification:

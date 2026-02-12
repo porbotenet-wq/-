@@ -64,6 +64,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (filters?.status) query = query.eq('status', filters.status);
     if (filters?.facadeId) query = query.eq('facade_id', filters.facadeId);
     if (filters?.assigneeId) query = query.eq('assignee_id', filters.assigneeId);
+    if (filters?.taskId) query = query.eq('id', filters.taskId);
 
     const { data } = await query.limit(100);
     set({ tasks: data || [], loading: false });

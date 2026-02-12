@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { useTelegram } from './hooks/useTelegram';
 import { useAppStore } from './stores/appStore';
 import { NavBar } from './components/NavBar';
@@ -8,11 +8,13 @@ import Tasks from './pages/Tasks';
 import PlanFact from './pages/PlanFact';
 import Modules from './pages/Modules';
 import ProjectInfo from './pages/ProjectInfo';
+import { resolveLaunchRoute } from './utils/launchContext';
 
 export default function App() {
   const { user: tgUser, startParam, isInTelegram } = useTelegram();
   const { loadUser, loadProject, user } = useAppStore();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     // Load user by Telegram ID (or mock for dev)
@@ -23,12 +25,14 @@ export default function App() {
 
   useEffect(() => {
     // Handle deep-link from bot
-    if (startParam) {
-      if (startParam.startsWith('task_')) navigate('/tasks');
-      else if (startParam.startsWith('plan_fact')) navigate('/plan-fact');
-      else if (startParam.startsWith('modules')) navigate('/modules');
+    const launchRoute = resolveLaunchRoute(startParam, window.location.search);
+    if (!launchRoute) return;
+
+    const currentRoute = `${location.pathname}${location.search}`;
+    if (launchRoute !== currentRoute) {
+      navigate(launchRoute, { replace: true });
     }
-  }, [startParam]);
+  }, [startParam, location.pathname, location.search, navigate]);
 
   if (!user) {
     return (

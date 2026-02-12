@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
 import { StatusBadge } from '../components/StatusBadge';
 import { supabase } from '../api/supabase';
+import { parsePositiveIntParam } from '../utils/launchContext';
 
 const STATUS_COLUMNS = ['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'DONE', 'VERIFIED'];
 const STATUS_LABELS: Record<string, string> = {
@@ -14,18 +16,28 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function Tasks() {
   const { tasks, loadTasks, project, facades, loadFacades } = useAppStore();
+  const [searchParams] = useSearchParams();
+  const deepLinkTaskId = parsePositiveIntParam(searchParams.get('task_id'));
+  const deepLinkFacadeId = parsePositiveIntParam(searchParams.get('facade_id'));
+  const deepLinkMode = searchParams.get('mode');
+
   const [view, setView] = useState<'kanban' | 'list'>('list');
   const [filterStatus, setFilterStatus] = useState<string>('');
-  const [filterFacade, setFilterFacade] = useState<number | ''>('');
+  const [filterFacade, setFilterFacade] = useState<number | ''>(deepLinkFacadeId || '');
+
+  useEffect(() => {
+    setFilterFacade(deepLinkFacadeId || '');
+  }, [deepLinkFacadeId]);
 
   useEffect(() => {
     if (!project) return;
     loadTasks(project.id, {
       status: filterStatus || undefined,
       facadeId: filterFacade || undefined,
+      taskId: deepLinkTaskId || undefined,
     });
     loadFacades(project.id);
-  }, [project, filterStatus, filterFacade]);
+  }, [project, filterStatus, filterFacade, deepLinkTaskId]);
 
   async function changeStatus(taskId: number, newStatus: string) {
     await supabase.from('task_instances').update({ status: newStatus }).eq('id', taskId);
@@ -35,6 +47,13 @@ export default function Tasks() {
   return (
     <div className="p-4">
       <h1 className="text-xl font-bold mb-4">📋 Задачи</h1>
+
+      {(deepLinkTaskId || deepLinkMode === 'defect') && (
+        <div className="mb-3 rounded-lg bg-tg-secondary border border-gray-700/30 p-3 text-xs text-tg-text">
+          {deepLinkTaskId && <div>Контекст: задача #{deepLinkTaskId}</div>}
+          {deepLinkMode === 'defect' && <div>Режим: фиксация дефекта</div>}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-2">

@@ -1,5 +1,5 @@
 // STSphera — Telegram Bot Webhook (Supabase Edge Function)
-// Handles: /start, /help, /tasks, /fact, /defect, callbacks
+// Handles: /start, /help, /app, /tasks, /fact, /defect, callbacks
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
@@ -7,11 +7,21 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
+const MINI_APP_URL = Deno.env.get("MINI_APP_URL") || "";
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
+
+type MiniAppContext = {
+  screen?: "dashboard" | "tasks" | "plan-fact" | "modules" | "project";
+  taskId?: number;
+  facadeId?: number;
+  date?: string;
+  mode?: string;
+  startapp?: string;
+};
 
 // ===========================
 // Telegram API helpers
@@ -44,6 +54,63 @@ async function answerCallback(callbackQueryId: string, text?: string) {
       callback_query_id: callbackQueryId,
       text: text || "",
     }),
+  });
+}
+
+function getTodayIsoDate() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function buildMiniAppUrl(context?: MiniAppContext): string | null {
+  if (!MINI_APP_URL) {
+    return null;
+  }
+
+  try {
+    const url = new URL(MINI_APP_URL);
+
+    if (context?.screen) url.searchParams.set("screen", context.screen);
+    if (context?.taskId) url.searchParams.set("task_id", String(context.taskId));
+    if (context?.facadeId) url.searchParams.set("facade_id", String(context.facadeId));
+    if (context?.date) url.searchParams.set("date", context.date);
+    if (context?.mode) url.searchParams.set("mode", context.mode);
+    if (context?.startapp) url.searchParams.set("startapp", context.startapp);
+
+    return url.toString();
+  } catch (error) {
+    console.error("Invalid MINI_APP_URL:", error);
+    return null;
+  }
+}
+
+function createMiniAppButton(text: string, context?: MiniAppContext) {
+  const url = buildMiniAppUrl(context);
+  if (!url) return null;
+
+  return {
+    text,
+    web_app: { url },
+  };
+}
+
+async function sendMiniAppButton(
+  chatId: number,
+  text: string,
+  context?: MiniAppContext,
+) {
+  const button = createMiniAppButton("📱 Открыть Mini App", context);
+  if (!button) {
+    await sendMessage(
+      chatId,
+      `${text}\n\n📱 Приложение временно недоступно. Обратитесь к администратору.`,
+    );
+    return;
+  }
+
+  await sendMessage(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [[button]],
+    },
   });
 }
 
@@ -96,7 +163,48 @@ async function createUser(from: any) {
 // ===========================
 // Command handlers
 // ===========================
-async function handleStart(chatId: number, from: any) {
+function parseStartContext(startParam?: string): MiniAppContext | null {
+  if (!startParam) return null;
+
+  const taskMatch = startParam.match(/^task_(\d+)$/);
+  if (taskMatch) {
+    return {
+      screen: "tasks",
+      taskId: Number(taskMatch[1]),
+      startapp: startParam,
+    };
+  }
+
+  const planFactMatch = startParam.match(/^plan_fact_(\d{4}-\d{2}-\d{2})$/);
+  if (planFactMatch) {
+    return {
+      screen: "plan-fact",
+      date: planFactMatch[1],
+      startapp: startParam,
+    };
+  }
+
+  const defectMatch = startParam.match(/^defect_facade_(\d+)$/);
+  if (defectMatch) {
+    return {
+      screen: "tasks",
+      facadeId: Number(defectMatch[1]),
+      mode: "defect",
+      startapp: startParam,
+    };
+  }
+
+  if (startParam === "modules") return { screen: "modules", startapp: startParam };
+  if (startParam === "project") return { screen: "project", startapp: startParam };
+  if (startParam === "tasks") return { screen: "tasks", startapp: startParam };
+  if (startParam === "plan_fact") {
+    return { screen: "plan-fact", date: getTodayIsoDate(), startapp: startParam };
+  }
+
+  return { screen: "dashboard", startapp: startParam };
+}
+
+async function handleStart(chatId: number, from: any, startParam?: string) {
   const user = await getUser(from.id);
 
   if (!user) {
@@ -131,7 +239,7 @@ async function handleStart(chatId: number, from: any) {
   const roleName = role?.display_name || "Пользователь";
   const isAdmin = role?.system_name === "admin" || role?.system_name === "project_director";
 
-  const buttons = [
+  const buttons: any[][] = [
     [
       { text: "📋 Мои задачи", callback_data: "my_tasks" },
       { text: "📝 Ввести факт", callback_data: "enter_fact" },
@@ -141,6 +249,13 @@ async function handleStart(chatId: number, from: any) {
       { text: "📊 Сводка", callback_data: "summary" },
     ],
   ];
+
+  const miniAppButton = createMiniAppButton("📱 Приложение", { screen: "dashboard" });
+  if (miniAppButton) {
+    buttons.push([miniAppButton]);
+  } else {
+    buttons.push([{ text: "📱 Приложение", callback_data: "open_app" }]);
+  }
 
   // Admin gets extra buttons
   if (isAdmin) {
@@ -156,6 +271,15 @@ async function handleStart(chatId: number, from: any) {
       reply_markup: { inline_keyboard: buttons },
     }
   );
+
+  const startContext = parseStartContext(startParam);
+  if (startContext) {
+    await sendMiniAppButton(
+      chatId,
+      "Откройте Mini App с переданным контекстом:",
+      startContext,
+    );
+  }
 }
 
 async function handleHelp(chatId: number) {
@@ -163,11 +287,22 @@ async function handleHelp(chatId: number) {
     chatId,
     "📋 *Команды STSphera Bot:*\n\n" +
       "/start — Главное меню\n" +
+      "/app — Открыть Mini App\n" +
       "/tasks — Мои задачи\n" +
       "/fact — Ввод факта\n" +
       "/defect — Фиксация дефекта\n" +
       "/help — Список команд"
   );
+}
+
+async function handleApp(chatId: number, from: any, context?: MiniAppContext) {
+  const user = await getUser(from.id);
+  if (!user || user.status !== "ACTIVE") {
+    await sendMessage(chatId, "Используйте /start для авторизации.");
+    return;
+  }
+
+  await sendMiniAppButton(chatId, "📱 Откройте Mini App STSphera:", context || { screen: "dashboard" });
 }
 
 async function handleTasks(chatId: number, from: any) {
@@ -197,6 +332,9 @@ async function handleTasks(chatId: number, from: any) {
   });
 
   await sendMessage(chatId, `📋 *Ваши задачи (${tasks.length}):*\n\n${lines.join("\n\n")}`);
+  await sendMiniAppButton(chatId, "Для полного просмотра откройте задачи в Mini App:", {
+    screen: "tasks",
+  });
 }
 
 async function handleFact(chatId: number, from: any) {
@@ -215,6 +353,11 @@ async function handleFact(chatId: number, from: any) {
 
   if (!tasks || tasks.length === 0) {
     await sendMessage(chatId, "📝 Нет активных задач для ввода факта.");
+    await sendMiniAppButton(chatId, "Откройте Plan/Fact в Mini App:", {
+      screen: "plan-fact",
+      date: getTodayIsoDate(),
+      startapp: "plan_fact",
+    });
     return;
   }
 
@@ -255,6 +398,10 @@ async function handleDefect(chatId: number, from: any) {
 
   if (!facades || facades.length === 0) {
     await sendMessage(chatId, "🔴 В проекте нет фасадов. Добавьте через импорт.");
+    await sendMiniAppButton(chatId, "Откройте Mini App для настройки проекта:", {
+      screen: "project",
+      startapp: "project",
+    });
     return;
   }
 
@@ -286,6 +433,42 @@ async function handleCallback(callbackQuery: any) {
     await handleFact(chatId, from);
   } else if (data === "report_defect") {
     await handleDefect(chatId, from);
+  } else if (data === "open_app") {
+    await handleApp(chatId, from, { screen: "dashboard" });
+  } else if (data.startsWith("fact_select:")) {
+    const taskId = Number(data.split(":")[1]);
+    if (!Number.isFinite(taskId) || taskId <= 0) {
+      await sendMessage(chatId, "Некорректный ID задачи.");
+      return;
+    }
+
+    await sendMiniAppButton(
+      chatId,
+      `📝 Переход к вводу факта по задаче #${taskId}:`,
+      {
+        screen: "plan-fact",
+        taskId,
+        date: getTodayIsoDate(),
+        startapp: `task_${taskId}`,
+      },
+    );
+  } else if (data.startsWith("defect_facade:")) {
+    const facadeId = Number(data.split(":")[1]);
+    if (!Number.isFinite(facadeId) || facadeId <= 0) {
+      await sendMessage(chatId, "Некорректный ID фасада.");
+      return;
+    }
+
+    await sendMiniAppButton(
+      chatId,
+      `🔴 Переход к фиксации дефекта по фасаду #${facadeId}:`,
+      {
+        screen: "tasks",
+        facadeId,
+        mode: "defect",
+        startapp: `defect_facade_${facadeId}`,
+      },
+    );
   } else if (data === "summary") {
     const { count: taskCount } = await supabase.from("task_instances").select("id", { count: "exact", head: true });
     const { count: userCount } = await supabase.from("users").select("id", { count: "exact", head: true });
@@ -301,6 +484,9 @@ async function handleCallback(callbackQuery: any) {
         `🔐 RBAC маппингов: ${rolePermCount}\n` +
         `✅ БД: 24 таблицы`
     );
+    await sendMiniAppButton(chatId, "Откройте Mini App для детальной аналитики:", {
+      screen: "dashboard",
+    });
   } else if (data.startsWith("accept:task:")) {
     const taskId = Number(data.split(":")[2]);
     const user = await getUser(from.id);
@@ -378,8 +564,21 @@ async function handleCallback(callbackQuery: any) {
     } else {
       await sendMessage(chatId, "❌ Ошибка настройки: " + (result.error || "неизвестная"));
     }
-  } else if (data.startsWith("view_tasks:") || data.startsWith("create_tasks:") || data.startsWith("view_modules:")) {
-    await sendMessage(chatId, "📱 Эта функция доступна в Mini App. Скоро будет доступна.");
+  } else if (data.startsWith("view_tasks:")) {
+    await sendMiniAppButton(chatId, "📋 Откройте задачи в Mini App:", {
+      screen: "tasks",
+      startapp: "tasks",
+    });
+  } else if (data.startsWith("create_tasks:")) {
+    await sendMiniAppButton(chatId, "📋 Откройте Mini App для управления задачами:", {
+      screen: "tasks",
+      startapp: "tasks",
+    });
+  } else if (data.startsWith("view_modules:")) {
+    await sendMiniAppButton(chatId, "📦 Откройте модули в Mini App:", {
+      screen: "modules",
+      startapp: "modules",
+    });
   }
 }
 
@@ -432,16 +631,20 @@ serve(async (req: Request) => {
       const chatId = update.message.chat.id;
       const text = update.message.text;
       const from = update.message.from;
+      const [command, startArg] = text.trim().split(/\s+/, 2);
 
-      if (text === "/start" || text.startsWith("/start ")) {
-        await handleStart(chatId, from);
-      } else if (text === "/help") {
+      if (command === "/start") {
+        await handleStart(chatId, from, startArg);
+      } else if (command === "/help") {
         await handleHelp(chatId);
-      } else if (text === "/tasks") {
+      } else if (command === "/app") {
+        const context = parseStartContext(startArg);
+        await handleApp(chatId, from, context || { screen: "dashboard" });
+      } else if (command === "/tasks") {
         await handleTasks(chatId, from);
-      } else if (text === "/fact") {
+      } else if (command === "/fact") {
         await handleFact(chatId, from);
-      } else if (text === "/defect") {
+      } else if (command === "/defect") {
         await handleDefect(chatId, from);
       }
     }

@@ -129,7 +129,12 @@ export enum ImportFileType {
 
 // --- RBAC Roles (from section 4) ---
 export enum SystemRole {
+  CEO = 'ceo',
+  DIRECTION_DIRECTOR = 'direction_director',
   PROJECT_DIRECTOR = 'project_director',
+  CONTRACT_MANAGER = 'contract_manager',
+  DESIGN_MANAGER = 'design_manager',
+  PROCUREMENT_MANAGER = 'procurement_manager',
   SITE_MANAGER = 'site_manager',
   FOREMAN = 'foreman',
   BRIGADIER = 'brigadier',
@@ -137,6 +142,7 @@ export enum SystemRole {
   LOGISTICS_MANAGER = 'logistics_manager',
   PRODUCTION_MANAGER = 'production_manager',
   ENGINEER = 'engineer',
+  PTO_MANAGER = 'pto_manager',
   ADMIN = 'admin',
   VIEWER = 'viewer',
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { useTelegram } from './hooks/useTelegram';
 import { useAppStore } from './stores/appStore';
@@ -9,19 +9,38 @@ import PlanFact from './pages/PlanFact';
 import Modules from './pages/Modules';
 import ProjectInfo from './pages/ProjectInfo';
 import { resolveLaunchRoute } from './utils/launchContext';
+import {
+  extractRoleSystemName,
+  isRouteAllowed,
+  loadRoleScreenContract,
+  resolveRoleAccess,
+  type RoleScreenContract,
+} from './contracts/roleScreens';
 
 export default function App() {
   const { user: tgUser, startParam, isInTelegram } = useTelegram();
   const { loadUser, loadProject, user } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const [screenContract, setScreenContract] = useState<RoleScreenContract | null>(null);
 
   useEffect(() => {
     // Load user by Telegram ID (or mock for dev)
     const telegramId = tgUser?.id || 8059235604; // fallback for dev
     loadUser(telegramId);
     loadProject();
-  }, [tgUser]);
+  }, [tgUser, loadUser, loadProject]);
+
+  useEffect(() => {
+    let active = true;
+    void loadRoleScreenContract().then((contract) => {
+      if (active) setScreenContract(contract);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Handle deep-link from bot
@@ -33,6 +52,19 @@ export default function App() {
       navigate(launchRoute, { replace: true });
     }
   }, [startParam, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    if (!user || !screenContract) {
+      return;
+    }
+
+    const roleName = extractRoleSystemName(user);
+    const access = resolveRoleAccess(screenContract, roleName);
+
+    if (!isRouteAllowed(access, location.pathname)) {
+      navigate(access.defaultRoute, { replace: true });
+    }
+  }, [user, screenContract, location.pathname, navigate]);
 
   if (!user) {
     return (

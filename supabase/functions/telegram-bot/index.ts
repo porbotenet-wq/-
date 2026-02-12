@@ -3,6 +3,7 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
+import { parseCallbackAction } from "./callback-map.ts";
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -426,159 +427,190 @@ async function handleCallback(callbackQuery: any) {
   await answerCallback(callbackQuery.id);
 
   if (!chatId || !data) return;
+  const parsedAction = parseCallbackAction(data);
 
-  if (data === "my_tasks") {
-    await handleTasks(chatId, from);
-  } else if (data === "enter_fact") {
-    await handleFact(chatId, from);
-  } else if (data === "report_defect") {
-    await handleDefect(chatId, from);
-  } else if (data === "open_app") {
-    await handleApp(chatId, from, { screen: "dashboard" });
-  } else if (data.startsWith("fact_select:")) {
-    const taskId = Number(data.split(":")[1]);
-    if (!Number.isFinite(taskId) || taskId <= 0) {
-      await sendMessage(chatId, "Некорректный ID задачи.");
-      return;
+  switch (parsedAction.type) {
+    case "my_tasks":
+      await handleTasks(chatId, from);
+      break;
+    case "enter_fact":
+      await handleFact(chatId, from);
+      break;
+    case "report_defect":
+      await handleDefect(chatId, from);
+      break;
+    case "open_app":
+      await handleApp(chatId, from, { screen: "dashboard" });
+      break;
+    case "fact_select":
+      await sendMiniAppButton(
+        chatId,
+        `📝 Переход к вводу факта по задаче #${parsedAction.taskId}:`,
+        {
+          screen: "plan-fact",
+          taskId: parsedAction.taskId,
+          date: getTodayIsoDate(),
+          startapp: `task_${parsedAction.taskId}`,
+        },
+      );
+      break;
+    case "defect_facade":
+      await sendMiniAppButton(
+        chatId,
+        `🔴 Переход к фиксации дефекта по фасаду #${parsedAction.facadeId}:`,
+        {
+          screen: "tasks",
+          facadeId: parsedAction.facadeId,
+          mode: "defect",
+          startapp: `defect_facade_${parsedAction.facadeId}`,
+        },
+      );
+      break;
+    case "summary": {
+      const { count: taskCount } = await supabase
+        .from("task_instances")
+        .select("id", { count: "exact", head: true });
+      const { count: userCount } = await supabase
+        .from("users")
+        .select("id", { count: "exact", head: true });
+      const { count: rolePermCount } = await supabase
+        .from("role_permissions")
+        .select("id", { count: "exact", head: true });
+      const { count: facadeCount } = await supabase
+        .from("facades")
+        .select("id", { count: "exact", head: true });
+
+      await sendMessage(
+        chatId,
+        `📊 *Сводка СИТИ-4:*\n\n` +
+          `👥 Пользователей: ${userCount}\n` +
+          `📋 Задач: ${taskCount || 0}\n` +
+          `🏢 Фасадов: ${facadeCount || 0}\n` +
+          `🔐 RBAC маппингов: ${rolePermCount}\n` +
+          `✅ БД: 24 таблицы`,
+      );
+      await sendMiniAppButton(chatId, "Откройте Mini App для детальной аналитики:", {
+        screen: "dashboard",
+      });
+      break;
     }
+    case "accept_task": {
+      const user = await getUser(from.id);
+      if (!user) return;
 
-    await sendMiniAppButton(
-      chatId,
-      `📝 Переход к вводу факта по задаче #${taskId}:`,
-      {
-        screen: "plan-fact",
-        taskId,
-        date: getTodayIsoDate(),
-        startapp: `task_${taskId}`,
-      },
-    );
-  } else if (data.startsWith("defect_facade:")) {
-    const facadeId = Number(data.split(":")[1]);
-    if (!Number.isFinite(facadeId) || facadeId <= 0) {
-      await sendMessage(chatId, "Некорректный ID фасада.");
-      return;
-    }
-
-    await sendMiniAppButton(
-      chatId,
-      `🔴 Переход к фиксации дефекта по фасаду #${facadeId}:`,
-      {
-        screen: "tasks",
-        facadeId,
-        mode: "defect",
-        startapp: `defect_facade_${facadeId}`,
-      },
-    );
-  } else if (data === "summary") {
-    const { count: taskCount } = await supabase.from("task_instances").select("id", { count: "exact", head: true });
-    const { count: userCount } = await supabase.from("users").select("id", { count: "exact", head: true });
-    const { count: rolePermCount } = await supabase.from("role_permissions").select("id", { count: "exact", head: true });
-    const { count: facadeCount } = await supabase.from("facades").select("id", { count: "exact", head: true });
-
-    await sendMessage(
-      chatId,
-      `📊 *Сводка СИТИ-4:*\n\n` +
-        `👥 Пользователей: ${userCount}\n` +
-        `📋 Задач: ${taskCount || 0}\n` +
-        `🏢 Фасадов: ${facadeCount || 0}\n` +
-        `🔐 RBAC маппингов: ${rolePermCount}\n` +
-        `✅ БД: 24 таблицы`
-    );
-    await sendMiniAppButton(chatId, "Откройте Mini App для детальной аналитики:", {
-      screen: "dashboard",
-    });
-  } else if (data.startsWith("accept:task:")) {
-    const taskId = Number(data.split(":")[2]);
-    const user = await getUser(from.id);
-    if (!user) return;
-
-    await supabase
-      .from("task_instances")
-      .update({ status: "IN_PROGRESS", actual_start: new Date().toISOString().split("T")[0] })
-      .eq("id", taskId);
-
-    await supabase.from("audit_logs").insert({
-      action: "TASK_STATUS_CHANGED",
-      entity_type: "TaskInstance",
-      entity_id: taskId,
-      user_id: user.id,
-      old_value: { status: "ASSIGNED" },
-      new_value: { status: "IN_PROGRESS" },
-    });
-
-    await sendMessage(chatId, "✅ Задача принята в работу!");
-  } else if (data.startsWith("accept_all:")) {
-    const taskIds = data.replace("accept_all:", "").split(",").map(Number);
-    const user = await getUser(from.id);
-    if (!user) return;
-
-    for (const taskId of taskIds) {
       await supabase
         .from("task_instances")
-        .update({ status: "IN_PROGRESS", actual_start: new Date().toISOString().split("T")[0] })
-        .eq("id", taskId)
-        .eq("assignee_id", user.id);
+        .update({
+          status: "IN_PROGRESS",
+          actual_start: new Date().toISOString().split("T")[0],
+        })
+        .eq("id", parsedAction.taskId);
+
+      await supabase.from("audit_logs").insert({
+        action: "TASK_STATUS_CHANGED",
+        entity_type: "TaskInstance",
+        entity_id: parsedAction.taskId,
+        user_id: user.id,
+        old_value: { status: "ASSIGNED" },
+        new_value: { status: "IN_PROGRESS" },
+      });
+
+      await sendMessage(chatId, "✅ Задача принята в работу!");
+      break;
     }
+    case "accept_all": {
+      const user = await getUser(from.id);
+      if (!user) return;
 
-    await supabase.from("audit_logs").insert({
-      action: "TASKS_ACCEPTED_BULK",
-      entity_type: "TaskInstance",
-      user_id: user.id,
-      new_value: { task_ids: taskIds, count: taskIds.length },
-    });
+      for (const taskId of parsedAction.taskIds) {
+        await supabase
+          .from("task_instances")
+          .update({
+            status: "IN_PROGRESS",
+            actual_start: new Date().toISOString().split("T")[0],
+          })
+          .eq("id", taskId)
+          .eq("assignee_id", user.id);
+      }
 
-    await sendMessage(chatId, `✅ Принято задач: ${taskIds.length}. Все в работе!`);
-  } else if (data === "setup_demo") {
-    await sendMessage(chatId, "⏳ Настраиваю демо-объект СИТИ-4...\nФасады, задачи, модули...");
+      await supabase.from("audit_logs").insert({
+        action: "TASKS_ACCEPTED_BULK",
+        entity_type: "TaskInstance",
+        user_id: user.id,
+        new_value: {
+          task_ids: parsedAction.taskIds,
+          count: parsedAction.taskIds.length,
+        },
+      });
 
-    // Call project-workflow function
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/project-workflow`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ action: "setup_demo", userId: from.id }),
-    });
-    
-    const result = await resp.json();
-    
-    if (result.data) {
-      await sendMessage(chatId,
-        `✅ *Демо-объект СИТИ-4 настроен!*\n\n` +
-        `🏢 Фасады: 4\n` +
-        `🔧 Типы работ: 8\n` +
-        `📋 Задач создано: ${result.data.generated || 0}\n` +
-        `👤 Назначено: ${result.data.assigned || 0}\n` +
-        `📦 Модулей: 4\n\n` +
-        `Все отделы уведомлены.`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "📋 Мои задачи", callback_data: "my_tasks" },
-               { text: "📊 Сводка", callback_data: "summary" }],
-            ],
-          },
-        }
+      await sendMessage(
+        chatId,
+        `✅ Принято задач: ${parsedAction.taskIds.length}. Все в работе!`,
       );
-    } else {
-      await sendMessage(chatId, "❌ Ошибка настройки: " + (result.error || "неизвестная"));
+      break;
     }
-  } else if (data.startsWith("view_tasks:")) {
-    await sendMiniAppButton(chatId, "📋 Откройте задачи в Mini App:", {
-      screen: "tasks",
-      startapp: "tasks",
-    });
-  } else if (data.startsWith("create_tasks:")) {
-    await sendMiniAppButton(chatId, "📋 Откройте Mini App для управления задачами:", {
-      screen: "tasks",
-      startapp: "tasks",
-    });
-  } else if (data.startsWith("view_modules:")) {
-    await sendMiniAppButton(chatId, "📦 Откройте модули в Mini App:", {
-      screen: "modules",
-      startapp: "modules",
-    });
+    case "setup_demo": {
+      await sendMessage(
+        chatId,
+        "⏳ Настраиваю демо-объект СИТИ-4...\nФасады, задачи, модули...",
+      );
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/project-workflow`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({ action: "setup_demo", userId: from.id }),
+      });
+
+      const result = await resp.json();
+
+      if (result.data) {
+        await sendMessage(
+          chatId,
+          `✅ *Демо-объект СИТИ-4 настроен!*\n\n` +
+            `🏢 Фасады: 4\n` +
+            `🔧 Типы работ: 8\n` +
+            `📋 Задач создано: ${result.data.generated || 0}\n` +
+            `👤 Назначено: ${result.data.assigned || 0}\n` +
+            `📦 Модулей: 4\n\n` +
+            `Все отделы уведомлены.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "📋 Мои задачи", callback_data: "my_tasks" },
+                  { text: "📊 Сводка", callback_data: "summary" },
+                ],
+              ],
+            },
+          },
+        );
+      } else {
+        await sendMessage(
+          chatId,
+          "❌ Ошибка настройки: " + (result.error || "неизвестная"),
+        );
+      }
+      break;
+    }
+    case "view_tasks":
+    case "create_tasks":
+      await sendMiniAppButton(chatId, "📋 Откройте задачи в Mini App:", {
+        screen: "tasks",
+        startapp: "tasks",
+      });
+      break;
+    case "view_modules":
+      await sendMiniAppButton(chatId, "📦 Откройте модули в Mini App:", {
+        screen: "modules",
+        startapp: "modules",
+      });
+      break;
+    case "unknown":
+      await sendMessage(chatId, "Неизвестное действие. Используйте /start.");
+      break;
   }
 }
 

@@ -1,16 +1,44 @@
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-
-const tabs = [
-  { path: '/', icon: '📊', label: 'Сводка' },
-  { path: '/tasks', icon: '📋', label: 'Задачи' },
-  { path: '/plan-fact', icon: '📝', label: 'План-Факт' },
-  { path: '/modules', icon: '📦', label: 'Модули' },
-  { path: '/project', icon: '🏗', label: 'Объект' },
-];
+import { useAppStore } from '../stores/appStore';
+import {
+  extractRoleSystemName,
+  getTabsForRole,
+  loadRoleScreenContract,
+  resolveRoleAccess,
+  type RoleScreenContract,
+} from '../contracts/roleScreens';
 
 export function NavBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { user } = useAppStore();
+  const [screenContract, setScreenContract] = useState<RoleScreenContract | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadRoleScreenContract().then((contract) => {
+      if (active) setScreenContract(contract);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const tabs = useMemo(() => {
+    if (!screenContract) {
+      return [];
+    }
+
+    const roleName = extractRoleSystemName(user);
+    const access = resolveRoleAccess(screenContract, roleName);
+    return getTabsForRole(screenContract, access);
+  }, [screenContract, user]);
+
+  if (tabs.length === 0) {
+    return null;
+  }
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-tg-secondary border-t border-gray-700/50 flex justify-around items-center py-2 px-1 z-50">

@@ -1,0 +1,92 @@
+{
+  "version": "2026-02-12",
+  "tabs": {
+    "dashboard": { "path": "/", "icon": "📊", "label": "Сводка" },
+    "tasks": { "path": "/tasks", "icon": "📋", "label": "Задачи" },
+    "plan_fact": { "path": "/plan-fact", "icon": "📝", "label": "План-Факт" },
+    "modules": { "path": "/modules", "icon": "📦", "label": "Модули" },
+    "project": { "path": "/project", "icon": "🏗", "label": "Объект" }
+  },
+  "roles": {
+    "admin": {
+      "defaultRoute": "/",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/modules", "/project"],
+      "tabs": ["dashboard", "tasks", "plan_fact", "modules", "project"]
+    },
+    "project_director": {
+      "defaultRoute": "/",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/modules", "/project"],
+      "tabs": ["dashboard", "tasks", "plan_fact", "modules", "project"]
+    },
+    "site_manager": {
+      "defaultRoute": "/tasks",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/modules", "/project"],
+      "tabs": ["dashboard", "tasks", "plan_fact", "modules", "project"]
+    },
+    "foreman": {
+      "defaultRoute": "/tasks",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/project"],
+      "tabs": ["dashboard", "tasks", "plan_fact", "project"]
+    },
+    "brigadier": {
+      "defaultRoute": "/plan-fact",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact"],
+      "tabs": ["dashboard", "tasks", "plan_fact"]
+    },
+    "qc_inspector": {
+      "defaultRoute": "/tasks",
+      "allowedRoutes": ["/", "/tasks", "/modules", "/project"],
+      "tabs": ["dashboard", "tasks", "modules", "project"]
+    },
+    "logistics_manager": {
+      "defaultRoute": "/modules",
+      "allowedRoutes": ["/", "/modules", "/project", "/tasks"],
+      "tabs": ["dashboard", "modules", "tasks", "project"]
+    },
+    "production_manager": {
+      "defaultRoute": "/modules",
+      "allowedRoutes": ["/", "/modules", "/tasks", "/project"],
+      "tabs": ["dashboard", "modules", "tasks", "project"]
+    },
+    "engineer": {
+      "defaultRoute": "/project",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/modules", "/project"],
+      "tabs": ["dashboard", "project", "tasks", "plan_fact", "modules"]
+    },
+    "viewer": {
+      "defaultRoute": "/",
+      "allowedRoutes": ["/", "/project"],
+      "tabs": ["dashboard", "project"]
+    },
+    "ceo": {
+      "defaultRoute": "/",
+      "allowedRoutes": ["/", "/project"],
+      "tabs": ["dashboard", "project"]
+    },
+    "direction_director": {
+      "defaultRoute": "/",
+      "allowedRoutes": ["/", "/tasks", "/plan-fact", "/modules", "/project"],
+      "tabs": ["dashboard", "tasks", "plan_fact", "modules", "project"]
+    },
+    "contract_manager": {
+      "defaultRoute": "/project",
+      "allowedRoutes": ["/", "/project", "/tasks"],
+      "tabs": ["dashboard", "project", "tasks"]
+    },
+    "design_manager": {
+      "defaultRoute": "/project",
+      "allowedRoutes": ["/", "/project", "/tasks"],
+      "tabs": ["dashboard", "project", "tasks"]
+    },
+    "procurement_manager": {
+      "defaultRoute": "/modules",
+      "allowedRoutes": ["/", "/modules", "/project", "/tasks"],
+      "tabs": ["dashboard", "modules", "project", "tasks"]
+    },
+    "pto_manager": {
+      "defaultRoute": "/plan-fact",
+      "allowedRoutes": ["/", "/plan-fact", "/project", "/tasks"],
+      "tabs": ["dashboard", "plan_fact", "project", "tasks"]
+    }
+  }
+}

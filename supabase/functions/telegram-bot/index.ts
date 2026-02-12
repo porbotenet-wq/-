@@ -36,6 +36,29 @@ type RoleActionConfig = {
   handler?: "tasks" | "fact" | "defect" | "summary";
 };
 
+type ResolvedRole = {
+  systemName: string;
+  displayName: string;
+  hasAssignedRole: boolean;
+  isAdmin: boolean;
+};
+
+const START_PARAM_ALLOWED = /^[a-zA-Z0-9_-]{1,64}$/;
+const ROLE_PRIORITY: Record<string, number> = {
+  admin: 0,
+  ceo: 1,
+  direction_director: 2,
+  project_director: 3,
+  contract_manager: 4,
+  design_manager: 5,
+  procurement_manager: 6,
+  pto_manager: 7,
+  site_manager: 8,
+  foreman: 9,
+  viewer: 100,
+};
+const ADMIN_ROLE_SYSTEM_NAMES = new Set(["admin", "project_director"]);
+
 // ===========================
 // Telegram API helpers
 // ===========================
@@ -147,6 +170,27 @@ function toInlineKeyboardButton(item: RoleMenuItem) {
     text: item.text,
     callback_data: item.callbackData || "open_app",
   };
+}
+
+function normalizeRoleSystemName(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function rolePriorityIndex(roleSystemName: string): number {
+  return ROLE_PRIORITY[roleSystemName] ?? 1000;
+}
+
+function normalizeStartParam(rawStartParam?: string): string | null {
+  if (!rawStartParam) return null;
+
+  const trimmed = rawStartParam.trim();
+  if (!trimmed) return null;
+
+  if (!START_PARAM_ALLOWED.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
 }
 
 function roleMenuRows(roleSystemName: string, isAdmin: boolean): RoleMenuItem[][] {
@@ -495,10 +539,70 @@ async function createUser(from: any) {
   return newUser;
 }
 
+function resolveUserRole(user: any): ResolvedRole {
+  const userRoles = Array.isArray(user?.user_roles) ? user.user_roles : [];
+  const availableRoles = userRoles
+    .map((userRole: any) => {
+      const role = userRole?.roles;
+      const systemName = normalizeRoleSystemName(role?.system_name);
+      if (!systemName) return null;
+
+      return {
+        systemName,
+        displayName: role?.display_name || "Пользователь",
+      };
+    })
+    .filter(
+      (value): value is { systemName: string; displayName: string } =>
+        value !== null,
+    );
+
+  if (availableRoles.length === 0) {
+    return {
+      systemName: "viewer",
+      displayName: "Пользователь",
+      hasAssignedRole: false,
+      isAdmin: false,
+    };
+  }
+
+  availableRoles.sort(
+    (left, right) =>
+      rolePriorityIndex(left.systemName) - rolePriorityIndex(right.systemName),
+  );
+
+  return {
+    systemName: availableRoles[0].systemName,
+    displayName: availableRoles[0].displayName,
+    hasAssignedRole: true,
+    isAdmin: availableRoles.some((role) =>
+      ADMIN_ROLE_SYSTEM_NAMES.has(role.systemName)
+    ),
+  };
+}
+
+async function sendMainMenu(chatId: number, user: any) {
+  const resolvedRole = resolveUserRole(user);
+  const buttons = roleMenuRows(resolvedRole.systemName, resolvedRole.isAdmin)
+    .map((row) => row.map((item) => toInlineKeyboardButton(item)));
+  const hint = resolvedRole.hasAssignedRole
+    ? "Выберите действие:"
+    : "⚠️ Роль не назначена или не распознана. Доступно базовое меню.";
+
+  await sendMessage(
+    chatId,
+    `🏗 *STSphera — ${resolvedRole.displayName}*\n📁 Проект: СИТИ-4\n\n${hint}`,
+    {
+      reply_markup: { inline_keyboard: buttons },
+    },
+  );
+}
+
 // ===========================
 // Command handlers
 // ===========================
-function parseStartContext(startParam?: string): MiniAppContext | null {
+function parseStartContext(rawStartParam?: string): MiniAppContext | null {
+  const startParam = normalizeStartParam(rawStartParam);
   if (!startParam) return null;
 
   const taskMatch = startParam.match(/^task_(\d+)$/);
@@ -540,6 +644,11 @@ function parseStartContext(startParam?: string): MiniAppContext | null {
 }
 
 async function handleStart(chatId: number, from: any, startParam?: string) {
+  const normalizedStartParam = normalizeStartParam(startParam);
+  if (startParam && !normalizedStartParam) {
+    console.warn("Invalid /start parameter ignored:", startParam);
+  }
+
   const user = await getUser(from.id);
 
   if (!user) {
@@ -559,35 +668,29 @@ async function handleStart(chatId: number, from: any, startParam?: string) {
     return;
   }
 
-  if (user.status === "PENDING") {
+  const userStatus = String(user.status || "").toUpperCase();
+
+  if (userStatus === "PENDING") {
     await sendMessage(chatId, "Ваша заявка на рассмотрении. Ожидайте назначения роли. ⏳");
     return;
   }
 
-  if (user.status === "BLOCKED") {
+  if (userStatus === "BLOCKED") {
     await sendMessage(chatId, "Ваш аккаунт заблокирован. Обратитесь к администратору. 🚫");
     return;
   }
 
-  // Active user — main menu
-  const role = user.user_roles?.[0]?.roles;
-  const roleName = role?.display_name || "Пользователь";
-  const roleSystemName = role?.system_name || "viewer";
-  const isAdmin =
-    roleSystemName === "admin" || roleSystemName === "project_director";
-  const buttons = roleMenuRows(roleSystemName, isAdmin).map((row) =>
-    row.map((item) => toInlineKeyboardButton(item)),
-  );
+  if (userStatus !== "ACTIVE") {
+    await sendMessage(
+      chatId,
+      "Не удалось определить статус пользователя. Используйте /start позже или обратитесь к администратору.",
+    );
+    return;
+  }
 
-  await sendMessage(
-    chatId,
-    `🏗 *STSphera — ${roleName}*\n📁 Проект: СИТИ-4\n\nВыберите действие:`,
-    {
-      reply_markup: { inline_keyboard: buttons },
-    }
-  );
+  await sendMainMenu(chatId, user);
 
-  const startContext = parseStartContext(startParam);
+  const startContext = parseStartContext(normalizedStartParam || undefined);
   if (startContext) {
     await sendMiniAppButton(
       chatId,
@@ -988,32 +1091,56 @@ async function handleCallback(callbackQuery: any) {
 // Notify admins
 // ===========================
 async function notifyAdmins(newUser: any) {
+  const { data: adminRoleRows, error: adminRoleError } = await supabase
+    .from("roles")
+    .select("id")
+    .in("system_name", Array.from(ADMIN_ROLE_SYSTEM_NAMES));
+
+  if (adminRoleError) {
+    console.error("Failed to resolve admin roles:", adminRoleError);
+    return;
+  }
+
+  const roleIds = (adminRoleRows || [])
+    .map((role: any) => Number(role.id))
+    .filter((roleId: number) => Number.isInteger(roleId) && roleId > 0);
+
+  if (roleIds.length === 0) return;
+
   const { data: adminRoles } = await supabase
     .from("user_roles")
     .select("user_id, users!user_roles_user_id_fkey(telegram_id)")
-    .eq("role_id", 9); // admin role id
+    .in("role_id", roleIds);
 
   if (!adminRoles) return;
 
+  const adminTelegramIds = new Set<number>();
   for (const ar of adminRoles) {
-    const tgId = (ar as any).users?.telegram_id;
-    if (!tgId) continue;
+    const tgId = Number((ar as any).users?.telegram_id);
+    if (!Number.isInteger(tgId) || tgId <= 0) continue;
+    adminTelegramIds.add(tgId);
+  }
 
-    await sendMessage(
-      Number(tgId),
-      `👤 *Новый пользователь:*\n` +
-        `Имя: ${newUser.first_name || ""} ${newUser.last_name || ""}\n` +
-        `Username: @${newUser.username || "—"}\n` +
-        `TG ID: \`${newUser.telegram_id}\`\n\n` +
-        `Требуется назначение роли.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "👤 Назначить роль", callback_data: `assign_role:${newUser.id}` }],
-          ],
+  for (const tgId of adminTelegramIds) {
+    try {
+      await sendMessage(
+        tgId,
+        `👤 *Новый пользователь:*\n` +
+          `Имя: ${newUser.first_name || ""} ${newUser.last_name || ""}\n` +
+          `Username: @${newUser.username || "—"}\n` +
+          `TG ID: \`${newUser.telegram_id}\`\n\n` +
+          `Требуется назначение роли.`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "👤 Назначить роль", callback_data: `assign_role:${newUser.id}` }],
+            ],
+          },
         },
-      }
-    );
+      );
+    } catch (error) {
+      console.error(`Failed to notify admin ${tgId}:`, error);
+    }
   }
 }
 

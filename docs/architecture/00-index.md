@@ -21,6 +21,7 @@
 9. [Assumptions & Critical Gaps](./09-assumptions-gaps.md) — 20 допущений, 5 критических разрывов
 10. [MVP Scope & Cutline](./10-mvp-scope-cutline.md) — 32 IN / 10 LATER / 4 OUT
 11. [Backlog (Epics → Stories)](./11-backlog.md) — 12 Epics, 79 Stories, ~344 SP
+12. [Enterprise Role Operating Model](./12-role-operating-model.md) — жизненный цикл объекта, RACI, детальная ролевая логика, эскалации L1/L2/L3
 
 ---
 

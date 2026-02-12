@@ -13,7 +13,7 @@ Telegram Bot + Mini App for construction project management.
 
 Full product architecture and requirements specification:
 
-**[docs/architecture/00-index.md](docs/architecture/00-index.md)** — Master index with all 11 sections.
+**[docs/architecture/00-index.md](docs/architecture/00-index.md)** — Master index with all 12 sections.
 
 ### Sections
 
@@ -31,6 +31,7 @@ Full product architecture and requirements specification:
 | 9 | Assumptions & Gaps | [09-assumptions-gaps.md](docs/architecture/09-assumptions-gaps.md) |
 | 10 | MVP Scope | [10-mvp-scope-cutline.md](docs/architecture/10-mvp-scope-cutline.md) |
 | 11 | Backlog | [11-backlog.md](docs/architecture/11-backlog.md) |
+| 12 | Role Operating Model | [12-role-operating-model.md](docs/architecture/12-role-operating-model.md) |
 
 ### Key Numbers
 

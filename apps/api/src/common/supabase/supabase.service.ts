@@ -5,22 +5,38 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 @Injectable()
 export class SupabaseService {
   private client: SupabaseClient;
+  private adminClient: SupabaseClient;
 
   constructor(private configService: ConfigService) {
     const url = this.configService.getOrThrow<string>('SUPABASE_URL');
-    const serviceKey = this.configService.getOrThrow<string>(
-      'SUPABASE_SERVICE_ROLE_KEY',
-    );
+    const anonKey = this.configService.getOrThrow<string>('SUPABASE_ANON_KEY');
+    const serviceKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
 
-    this.client = createClient(url, serviceKey, {
+    // Public client (respects RLS)
+    this.client = createClient(url, anonKey, {
       auth: { persistSession: false },
     });
 
-    console.log('[Supabase] Client initialized');
+    // Admin client (bypasses RLS) — for server-side operations
+    if (serviceKey) {
+      this.adminClient = createClient(url, serviceKey, {
+        auth: { persistSession: false },
+      });
+    } else {
+      this.adminClient = this.client;
+    }
+
+    console.log('[Supabase] Clients initialized');
   }
 
+  /** Public client (respects RLS) */
   getClient(): SupabaseClient {
     return this.client;
+  }
+
+  /** Admin client (bypasses RLS) — for server-side operations */
+  getAdminClient(): SupabaseClient {
+    return this.adminClient;
   }
 
   /** Upload file to Supabase Storage */
@@ -30,7 +46,7 @@ export class SupabaseService {
     file: Buffer,
     contentType: string,
   ) {
-    const { data, error } = await this.client.storage
+    const { data, error } = await this.adminClient.storage
       .from(bucket)
       .upload(path, file, { contentType, upsert: false });
 
@@ -40,7 +56,7 @@ export class SupabaseService {
 
   /** Get signed URL for file download */
   async getSignedUrl(bucket: string, path: string, expiresIn = 3600) {
-    const { data, error } = await this.client.storage
+    const { data, error } = await this.adminClient.storage
       .from(bucket)
       .createSignedUrl(path, expiresIn);
 
@@ -50,7 +66,7 @@ export class SupabaseService {
 
   /** Delete file from Supabase Storage */
   async deleteFile(bucket: string, paths: string[]) {
-    const { error } = await this.client.storage.from(bucket).remove(paths);
+    const { error } = await this.adminClient.storage.from(bucket).remove(paths);
     if (error) throw error;
   }
 }

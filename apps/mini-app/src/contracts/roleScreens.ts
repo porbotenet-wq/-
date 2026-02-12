@@ -42,10 +42,14 @@ const FALLBACK_CONTRACT: RoleScreenContract = {
 };
 
 let contractPromise: Promise<RoleScreenContract> | null = null;
+const CONTRACT_URL = new URL(
+  'contracts/role-screen-contracts.json',
+  import.meta.env.BASE_URL,
+).toString();
 
 export async function loadRoleScreenContract(): Promise<RoleScreenContract> {
   if (!contractPromise) {
-    contractPromise = fetch('/contracts/role-screen-contracts.json')
+    contractPromise = fetch(CONTRACT_URL)
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Failed to fetch role screen contract: ${response.status}`);

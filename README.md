@@ -9,6 +9,10 @@ Telegram Bot + Mini App for construction project management.
   - Quick actions from callbacks (`fact_select`, `defect_facade`, `view_tasks`, `view_modules`) open Mini App with context (`task_id`, `facade_id`, `date`, `mode`)
 - Mini App parses launch context from `startapp` and URL query params, then navigates to the target screen (`/tasks`, `/plan-fact`, `/modules`, `/project`)
 - Telegram bot main menu is now role-aware for enterprise roles (CEO, direction director, contract/design/procurement/PTO managers, project/site/foreman roles) with action-first callback flows.
+- Nest API now includes runtime notifications:
+  - scenario-based dispatch from `notification_scenarios` with template variable rendering
+  - automatic triggers for task assignment (NS-01), critical plan/fact deviation (NS-11), and task completion (NS-17)
+  - overdue escalation runner with L1/L2/L3 thresholds (`escalation_l1_days`, `escalation_l2_days`, `escalation_l3_days`) via `POST /api/v1/notifications/run-overdue-escalation`
 
 ## Documentation
 

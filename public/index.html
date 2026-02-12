@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -23,6 +23,24 @@
           <button id="decrement-btn" type="button">-</button>
           <button id="increment-btn" type="button">+</button>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Payload details</h2>
+        <label class="field">
+          Category
+          <select id="category-input">
+            <option value="general">General</option>
+            <option value="support">Support</option>
+            <option value="billing">Billing</option>
+            <option value="feedback">Feedback</option>
+          </select>
+        </label>
+        <label class="field">
+          Note
+          <textarea id="note-input" rows="4" placeholder="Optional note"></textarea>
+        </label>
+        <p id="submissions-line">Submissions: <span id="submissions-value">0</span></p>
       </section>
 
       <button id="send-btn" class="primary" type="button">

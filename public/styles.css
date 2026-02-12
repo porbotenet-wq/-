@@ -51,6 +51,35 @@ h1 {
   gap: 8px;
 }
 
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+select,
+textarea {
+  border: 1px solid rgba(120, 120, 120, 0.5);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+#submissions-line {
+  margin: 6px 0 0;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
 button {
   border: 1px solid rgba(120, 120, 120, 0.5);
   border-radius: 10px;

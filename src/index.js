@@ -1,6 +1,7 @@
 const dotenv = require('dotenv');
 const { createBot, launchBot } = require('./bot');
 const { startMiniAppServer } = require('./server');
+const { createStore } = require('./store');
 
 dotenv.config();
 
@@ -32,14 +33,17 @@ async function main() {
     process.env.PUBLIC_URL || `http://localhost:${port}`,
   );
   const miniAppPath = process.env.MINI_APP_PATH || '/';
+  const storeFile = process.env.STORE_FILE;
   const miniAppUrl = buildMiniAppUrl(publicUrl, miniAppPath);
 
-  const { server } = await startMiniAppServer({ port, miniAppPath });
-  const bot = createBot({ token, miniAppUrl });
+  const store = await createStore({ filePath: storeFile });
+  const { server } = await startMiniAppServer({ port, miniAppPath, store });
+  const bot = createBot({ token, miniAppUrl, store });
   await launchBot(bot);
 
   console.log(`Mini app server is running on port ${port}`);
   console.log(`Mini app URL: ${miniAppUrl}`);
+  console.log(`Store file: ${store.filePath}`);
 
   const stop = (signal) => {
     console.log(`Received ${signal}, shutting down...`);

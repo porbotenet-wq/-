@@ -97,6 +97,14 @@ function getTodayIsoDate() {
   return new Date().toISOString().split("T")[0];
 }
 
+function getTodayHumanDate() {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const year = now.getFullYear();
+  return `${day}.${month}.${year}`;
+}
+
 function buildMiniAppUrl(context?: MiniAppContext): string | null {
   if (!MINI_APP_URL) {
     return null;
@@ -586,12 +594,18 @@ async function sendMainMenu(chatId: number, user: any) {
   const buttons = roleMenuRows(resolvedRole.systemName, resolvedRole.isAdmin)
     .map((row) => row.map((item) => toInlineKeyboardButton(item)));
   const hint = resolvedRole.hasAssignedRole
-    ? "Выберите действие:"
+    ? "Выберите действие из главного меню:"
     : "⚠️ Роль не назначена или не распознана. Доступно базовое меню.";
+  const miniAppHint = MINI_APP_URL
+    ? "📱 Mini App доступен по кнопкам меню."
+    : "📱 Mini App сейчас недоступен, обратитесь к администратору.";
+  const roleLine = resolvedRole.hasAssignedRole
+    ? `👤 Роль: ${resolvedRole.displayName}`
+    : "👤 Роль: не назначена";
 
   await sendMessage(
     chatId,
-    `🏗 *STSphera — ${resolvedRole.displayName}*\n📁 Проект: СИТИ-4\n\n${hint}`,
+    `🏠 *Главный экран STSphera*\n${roleLine}\n📁 Проект: СИТИ-4\n📅 Дата: ${getTodayHumanDate()}\n\n${hint}\n${miniAppHint}`,
     {
       reply_markup: { inline_keyboard: buttons },
     },
@@ -660,7 +674,11 @@ async function handleStart(chatId: number, from: any, startParam?: string) {
 
     await sendMessage(
       chatId,
-      `Добро пожаловать в STSphera, ${from.first_name}! 🏗\n\nВаша заявка на рассмотрении. Администратор назначит вам роль.`
+      `👋 Добро пожаловать в STSphera, ${from.first_name || "коллега"}!\n\n` +
+        `✅ Ваша заявка зарегистрирована.\n` +
+        `⏳ Сейчас статус: *PENDING*.\n` +
+        `👤 Администратор назначит вам роль и доступ.\n\n` +
+        `После назначения роли снова отправьте /start.`
     );
 
     // Notify admins
@@ -671,12 +689,22 @@ async function handleStart(chatId: number, from: any, startParam?: string) {
   const userStatus = String(user.status || "").toUpperCase();
 
   if (userStatus === "PENDING") {
-    await sendMessage(chatId, "Ваша заявка на рассмотрении. Ожидайте назначения роли. ⏳");
+    await sendMessage(
+      chatId,
+      `⏳ *Заявка в обработке*\n\n` +
+        `Роль пока не назначена.\n` +
+        `Как только администратор выдаст доступ, отправьте /start и откроется рабочее меню.`,
+    );
     return;
   }
 
   if (userStatus === "BLOCKED") {
-    await sendMessage(chatId, "Ваш аккаунт заблокирован. Обратитесь к администратору. 🚫");
+    await sendMessage(
+      chatId,
+      `🚫 *Доступ ограничен*\n\n` +
+        `Ваш аккаунт заблокирован.\n` +
+        `Для разблокировки обратитесь к администратору проекта.`,
+    );
     return;
   }
 
@@ -692,9 +720,10 @@ async function handleStart(chatId: number, from: any, startParam?: string) {
 
   const startContext = parseStartContext(normalizedStartParam || undefined);
   if (startContext) {
+    const contextCode = startContext.startapp || "context";
     await sendMiniAppButton(
       chatId,
-      "Откройте Mini App с переданным контекстом:",
+      `🎯 Контекст запуска: \`${contextCode}\`\nОткройте Mini App по кнопке ниже:`,
       startContext,
     );
   }

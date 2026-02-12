@@ -9,9 +9,48 @@ body {
   background-color: var(--tg-theme-bg-color, #1a1a2e);
   color: var(--tg-theme-text-color, #e0e0e0);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prevent overscroll bounce on iOS */
+html, body {
+  overscroll-behavior: none;
 }
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--tg-theme-hint-color, #555); border-radius: 2px; }
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Input focus styles */
+input:focus, select:focus {
+  outline: none;
+}
+
+/* Smooth transitions */
+.transition-all {
+  transition-duration: 200ms;
+}
+
+/* Number input spinner removal */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Recharts tooltip fix for dark theme */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: var(--tg-theme-secondary-bg-color, #16213e) !important;
+  border-color: #333 !important;
+  border-radius: 8px !important;
+}

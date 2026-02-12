@@ -203,8 +203,10 @@ export class BotService implements OnModuleInit {
 
     const keyboard = new InlineKeyboard();
     for (const task of tasks) {
-      const name =
-        task.task_templates?.name || `Задача #${task.id}`;
+      const template = Array.isArray(task.task_templates)
+        ? task.task_templates[0]
+        : task.task_templates;
+      const name = template?.name || `Задача #${task.id}`;
       keyboard.text(
         name.length > 40 ? name.substring(0, 37) + '...' : name,
         `fact_select:${task.id}`,

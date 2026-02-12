@@ -85,7 +85,7 @@ export class TaskService {
     // Guard: IN_PROGRESS → DONE requires all predecessors done
     if (newStatus === 'DONE') {
       const unfinishedPredecessors = task.predecessors.filter(
-        (dep) =>
+        (dep: { predecessor: { status: string } }) =>
           !['DONE', 'VERIFIED', 'CANCELLED'].includes(
             dep.predecessor.status,
           ),

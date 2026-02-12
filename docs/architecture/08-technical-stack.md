@@ -7,8 +7,8 @@
 | **Backend Runtime** | Node.js | 20 LTS | Единый язык с фронтендом (TypeScript); нативная асинхронность для I/O-bound задач (Bot API, DB, S3); зрелая экосистема для Telegram ботов |
 | **Backend Framework** | NestJS | 10.x | Модульная архитектура (модули = bounded contexts); встроенные Guards (RBAC), Interceptors (AuditLog), Pipes (валидация); OpenAPI из коробки; DI-контейнер |
 | **Language** | TypeScript | 5.x | Строгая типизация для доменной модели (24 сущности); рефакторинг-friendly; единый язык backend + frontend |
-| **Database** | PostgreSQL | 16 | JSONB для гибких конфигов (buttons_config, escalation_config); GENERATED columns для deviation/pct; массивы (facade_ids INT[]); window functions для накоплений; pg_cron для простых расписаний |
-| **ORM** | Prisma | 5.x | Type-safe queries; auto-generated типы из schema; миграции; introspection для legacy DB [Assumption: возможна замена на TypeORM если нужен более тонкий контроль] |
+| **Database** | Supabase (PostgreSQL 15) | — | Managed PostgreSQL: JSONB, GENERATED columns, массивы, window functions. Плюс: Supabase Storage (файлы/фото вместо MinIO), Realtime (подписки), Dashboard для администрирования |
+| **ORM** | Prisma | 5.x | Type-safe queries; auto-generated типы из schema; миграции; подключение к Supabase PostgreSQL через `DATABASE_URL` |
 | **Queue / Jobs** | BullMQ + Redis | 5.x / 7.x | Cron-задачи (уведомления, эскалации, сводки); retry с backoff; приоритеты; dashboard (Bull Board) для мониторинга |
 | **Cache** | Redis | 7.x | Кэш агрегаций (дашборд), сессии, rate limiting |
 | **Telegram Bot** | grammY | 1.x | TypeScript-native; middleware-архитектура (совместима с NestJS); sessions, conversations, inline keyboards; хорошая документация |
@@ -20,7 +20,7 @@
 | **Table** | TanStack Table | 8.x | Виртуализация для больших таблиц план-факт; inline editing; сортировка/фильтрация |
 | **State Management** | Zustand | 4.x | Лёгкий, без boilerplate; подходит для Mini App (ограниченный scope) |
 | **API Client** | Axios + React Query | 5.x / 5.x | Кэширование, retry, optimistic updates |
-| **File Storage** | MinIO (self-hosted) / S3 | latest | S3-совместимый API; фото, документы; pre-signed URLs |
+| **File Storage** | Supabase Storage | — | S3-совместимый API (встроен в Supabase); фото, документы; pre-signed URLs; RLS policies для доступа |
 | **Excel Parsing** | ExcelJS | 4.x | Чтение .xlsx; поддержка merged cells, формул; streaming для больших файлов |
 | **Validation** | Zod | 3.x | Schema validation для API + import; type inference |
 | **Auth** | JWT (jsonwebtoken) + Telegram initData HMAC | — | Stateless auth; refresh token rotation |

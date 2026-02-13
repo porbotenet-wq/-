@@ -1,0 +1,28 @@
+{
+  "name": "stsphera",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:mini-app": "npm run dev -w apps/mini-app",
+    "build:api": "npm run build -w apps/api",
+    "build:mini-app": "npm run build -w apps/mini-app",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:push": "npm run db:push -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api",
+    "setup:bot": "node scripts/setup-bot.mjs",
+    "deploy:mini-app": "cd apps/mini-app && npm run build && cd ../.. && cp -r apps/mini-app/dist/* /tmp/gh-pages-deploy/",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "supabase": "^2.76.8"
+  }
+}

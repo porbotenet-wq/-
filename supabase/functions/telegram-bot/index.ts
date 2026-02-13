@@ -60,37 +60,59 @@ const ROLE_PRIORITY: Record<string, number> = {
 const ADMIN_ROLE_SYSTEM_NAMES = new Set(["admin", "project_director"]);
 
 // ===========================
+// Wizard state (text-input steps)
+// ===========================
+interface WizardState { step: string; data: Record<string, any>; messageId: number; expiresAt: number; }
+const wizardState = new Map<number, WizardState>();
+function setWizard(chatId: number, step: string, messageId: number, data: Record<string, any> = {}) {
+  wizardState.set(chatId, { step, data, messageId, expiresAt: Date.now() + 5 * 60_000 });
+}
+function getWizard(chatId: number): WizardState | null {
+  const s = wizardState.get(chatId);
+  if (!s) return null;
+  if (s.expiresAt < Date.now()) { wizardState.delete(chatId); return null; }
+  return s;
+}
+function clearWizard(chatId: number) { wizardState.delete(chatId); }
+
+// ===========================
 // Telegram API helpers
 // ===========================
-async function sendMessage(
-  chatId: number,
-  text: string,
-  opts?: {
-    parse_mode?: string;
-    reply_markup?: any;
-  }
-) {
-  await fetch(`${TG_API}/sendMessage`, {
+async function tgCall(method: string, body: Record<string, any>): Promise<any> {
+  const res = await fetch(`${TG_API}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: opts?.parse_mode || "Markdown",
-      reply_markup: opts?.reply_markup,
-    }),
+    body: JSON.stringify(body),
   });
+  return res.json();
+}
+
+async function sendMessage(chatId: number, text: string, opts?: { parse_mode?: string; reply_markup?: any }): Promise<number> {
+  const res = await tgCall("sendMessage", { chat_id: chatId, text, parse_mode: opts?.parse_mode || "Markdown", reply_markup: opts?.reply_markup });
+  return res?.result?.message_id || 0;
+}
+
+async function editMessage(chatId: number, messageId: number, text: string, opts?: { parse_mode?: string; reply_markup?: any }) {
+  await tgCall("editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: opts?.parse_mode || "Markdown", reply_markup: opts?.reply_markup });
+}
+
+async function deleteMessage(chatId: number, messageId: number) {
+  await tgCall("deleteMessage", { chat_id: chatId, message_id: messageId });
 }
 
 async function answerCallback(callbackQueryId: string, text?: string) {
-  await fetch(`${TG_API}/answerCallbackQuery`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      callback_query_id: callbackQueryId,
-      text: text || "",
-    }),
-  });
+  await tgCall("answerCallbackQuery", { callback_query_id: callbackQueryId, text: text || "" });
+}
+
+/** Send new OR edit existing. All screen renderers use this. */
+async function render(chatId: number, msgId: number | null, text: string, keyboard?: any[][]): Promise<number> {
+  const markup = keyboard && keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
+  if (msgId) { await editMessage(chatId, msgId, text, { reply_markup: markup }); return msgId; }
+  return await sendMessage(chatId, text, { reply_markup: markup });
+}
+
+async function renderDone(chatId: number, msgId: number | null, text: string) {
+  if (msgId) { await editMessage(chatId, msgId, text); } else { await sendMessage(chatId, text); }
 }
 
 function getTodayIsoDate() {
@@ -627,7 +649,7 @@ function resolveUserRole(user: any): ResolvedRole {
   };
 }
 
-async function sendMainMenu(chatId: number, user: any) {
+async function sendMainMenu(chatId: number, user: any, msgId: number | null = null) {
   const resolvedRole = resolveUserRole(user);
   const buttons = roleMenuRows(resolvedRole.systemName, resolvedRole.isAdmin)
     .map((row) => row.map((item) => toInlineKeyboardButton(item)));
@@ -641,12 +663,9 @@ async function sendMainMenu(chatId: number, user: any) {
     ? `👤 Роль: ${resolvedRole.displayName}`
     : "👤 Роль: не назначена";
 
-  await sendMessage(
-    chatId,
+  await render(chatId, msgId,
     `🏠 *Главный экран STSphera*\n${roleLine}\n📁 Проект: СИТИ-4\n📅 Дата: ${getTodayHumanDate()}\n\n${hint}\n${miniAppHint}`,
-    {
-      reply_markup: { inline_keyboard: buttons },
-    },
+    buttons,
   );
 }
 
@@ -819,7 +838,7 @@ const PRIORITY_ICON: Record<string, string> = {
 
 type TaskFilter = "all" | "assigned" | "progress" | "overdue" | "done";
 
-async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all") {
+async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all", msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user || user.status !== "ACTIVE") {
     await sendMessage(chatId, "Используйте /start для авторизации.");
@@ -902,10 +921,9 @@ async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all"
       overdue: "Просроченных задач нет — отлично!",
       done: "Завершённых задач пока нет.",
     };
-    await sendMessage(
-      chatId,
+    await render(chatId, msgId,
       headerLines.join("\n") + `\n\n📎 Фильтр: *${filterLabels[activeFilter]}*\n\n${emptyHint[activeFilter]}`,
-      { reply_markup: { inline_keyboard: buildTaskFilterButtons(activeFilter, ac, pc, oc) } },
+      buildTaskFilterButtons(activeFilter, ac, pc, oc),
     );
     return;
   }
@@ -973,7 +991,7 @@ async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all"
 
   const keyboard = [...taskButtons, ...filterRow, ...navRow];
 
-  await sendMessage(chatId, bodyText, { reply_markup: { inline_keyboard: keyboard } });
+  await render(chatId, msgId, bodyText, keyboard);
 }
 
 function buildTaskFilterButtons(active: TaskFilter, ac: number, pc: number, oc: number): any[][] {
@@ -994,7 +1012,7 @@ function buildTaskFilterButtons(active: TaskFilter, ac: number, pc: number, oc: 
 // ===========================
 // Task detail card
 // ===========================
-async function handleTaskDetail(chatId: number, from: any, taskId: number) {
+async function handleTaskDetail(chatId: number, from: any, taskId: number, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user || user.status !== "ACTIVE") {
     await sendMessage(chatId, "Используйте /start для авторизации.");
@@ -1085,13 +1103,13 @@ async function handleTaskDetail(chatId: number, from: any, taskId: number) {
   if (miniAppBtn) backRow.push(miniAppBtn);
   buttons.push(backRow);
 
-  await sendMessage(chatId, text, { reply_markup: { inline_keyboard: buttons } });
+  await render(chatId, msgId, text, buttons);
 }
 
 // ===========================
 // Task state transitions with guards
 // ===========================
-async function handleTaskDone(chatId: number, from: any, taskId: number) {
+async function handleTaskDone(chatId: number, from: any, taskId: number, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user) return;
 
@@ -1130,14 +1148,11 @@ async function handleTaskDone(chatId: number, from: any, taskId: number) {
   });
 
   const taskName = getTaskName(task) || `#${taskId}`;
-  await sendMessage(chatId, `✅ Задача «${taskName}» завершена.\nОжидает верификации.`, {
-    reply_markup: { inline_keyboard: [
-      [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
-    ]},
-  });
+  await render(chatId, msgId, `✅ Задача «${taskName}» завершена.\nОжидает верификации.`,
+    [[{ text: "🔵 Задачи", callback_data: "my_tasks" }, { text: "🔵 Меню", callback_data: "main_menu" }]]);
 }
 
-async function handleTaskVerify(chatId: number, from: any, taskId: number) {
+async function handleTaskVerify(chatId: number, from: any, taskId: number, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user) return;
 
@@ -1175,14 +1190,10 @@ async function handleTaskVerify(chatId: number, from: any, taskId: number) {
   });
 
   const taskName = getTaskName(task) || `#${taskId}`;
-  await sendMessage(chatId, `✔️ Задача «${taskName}» верифицирована.`, {
-    reply_markup: { inline_keyboard: [
-      [{ text: "📋 Задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
-    ]},
-  });
+  await renderDone(chatId, msgId, `✔️ Задача «${taskName}» верифицирована.`);
 }
 
-async function handleTaskBlock(chatId: number, from: any, taskId: number) {
+async function handleTaskBlock(chatId: number, from: any, taskId: number, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user) return;
 
@@ -1214,15 +1225,11 @@ async function handleTaskBlock(chatId: number, from: any, taskId: number) {
   });
 
   const taskName = getTaskName(task) || `#${taskId}`;
-  await sendMessage(chatId, `🔴 Задача «${taskName}» заблокирована.`, {
-    reply_markup: { inline_keyboard: [
-      [{ text: "🔓 Разблокировать", callback_data: `task_unblock:${taskId}` }],
-      [{ text: "📋 Задачи", callback_data: "my_tasks" }],
-    ]},
-  });
+  await render(chatId, msgId, `🔴 Задача «${taskName}» заблокирована.`,
+    [[{ text: "🟢 Разблокировать", callback_data: `task_unblock:${taskId}` }, { text: "🔵 Задачи", callback_data: "my_tasks" }]]);
 }
 
-async function handleTaskUnblock(chatId: number, from: any, taskId: number) {
+async function handleTaskUnblock(chatId: number, from: any, taskId: number, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user) return;
 
@@ -1253,14 +1260,13 @@ async function handleTaskUnblock(chatId: number, from: any, taskId: number) {
   });
 
   const taskName = getTaskName(task) || `#${taskId}`;
-  await sendMessage(chatId, `🔓 Задача «${taskName}» разблокирована → В работе.`, {
-    reply_markup: { inline_keyboard: [
-      [{ text: "📋 Задачи", callback_data: "my_tasks" }],
-    ]},
-  });
+  await renderDone(chatId, msgId, `🔓 Задача «${taskName}» разблокирована → В работе.`);
 }
 
-async function handleFact(chatId: number, from: any) {
+// ===========================
+// Screen 3: /fact — Fact Entry Wizard
+// ===========================
+async function handleFact(chatId: number, from: any, msgId: number | null = null) {
   const user = await getUser(from.id);
   if (!user || user.status !== "ACTIVE") {
     await sendMessage(chatId, "Используйте /start для авторизации.");
@@ -1269,29 +1275,115 @@ async function handleFact(chatId: number, from: any) {
 
   const { data: tasks } = await supabase
     .from("task_instances")
-    .select("id, task_templates(name)")
+    .select("id, completion_pct, task_templates(name, unit), facades(name)")
     .eq("assignee_id", user.id)
     .eq("status", "IN_PROGRESS")
-    .limit(10);
+    .order("planned_end", { ascending: true })
+    .limit(5);
 
   if (!tasks || tasks.length === 0) {
-    await sendMessage(chatId, "📝 Нет активных задач для ввода факта.");
-    await sendMiniAppButton(chatId, "Откройте Plan/Fact в Mini App:", {
-      screen: "plan-fact",
-      date: getTodayIsoDate(),
-      startapp: "plan_fact",
-    });
+    await render(chatId, msgId,
+      `📝 *Ввод факта — ${getTodayHumanDate()}*\n\nНет задач в статусе «В работе».`,
+      [[{ text: "🔵 Задачи", callback_data: "my_tasks" }, { text: "🔵 Меню", callback_data: "main_menu" }]]);
     return;
   }
 
-  const buttons = tasks.map((t: any) => [{
-    text: getTaskName(t).substring(0, 40),
+  const buttons: any[][] = tasks.map((t: any) => [{
+    text: `🔵 ${getTaskName(t).substring(0, 32)}`,
     callback_data: `fact_select:${t.id}`,
   }]);
+  buttons.push([{ text: "🔴 Отмена", callback_data: "main_menu" }]);
 
-  await sendMessage(chatId, "Выберите задачу для ввода факта:", {
-    reply_markup: { inline_keyboard: buttons },
+  await render(chatId, msgId,
+    `📝 *Ввод факта — Шаг 1/3*\n📅 ${getTodayHumanDate()}\n\nВыберите задачу:`,
+    buttons);
+}
+
+/** Fact wizard step 2: show task info, ask for numeric value (text input) */
+async function factWizardStep2(chatId: number, from: any, taskId: number, msgId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("id, completion_pct, actual_volume, planned_volume, task_templates(name, unit), facades(name)")
+    .eq("id", taskId).maybeSingle();
+
+  if (!task) { await editMessage(chatId, msgId, "❌ Задача не найдена."); return; }
+
+  const name = getTaskName(task);
+  const unit = task.task_templates?.unit || "ед.";
+  const pct = Number(task.completion_pct || 0).toFixed(0);
+  const facade = task.facades?.name || "—";
+
+  setWizard(chatId, "fact_await_value", msgId, { taskId, taskName: name, unit, userId: user.id });
+
+  await editMessage(chatId, msgId,
+    `📝 *Ввод факта — Шаг 2/3*\n\n📋 *${name}*\n🏢 ${facade} | 📈 ${pct}%\n\n✏️ Введите значение (${unit}):`,
+    { reply_markup: { inline_keyboard: [[{ text: "🔴 Отмена", callback_data: "fact_cancel" }]] } });
+}
+
+/** Fact wizard step 3: confirm value */
+async function factWizardStep3(chatId: number, msgId: number, taskId: number, taskName: string, unit: string, value: number) {
+  const valEnc = Math.round(value * 100);
+  await editMessage(chatId, msgId,
+    `📝 *Ввод факта — Шаг 3/3*\n\n📋 *${taskName}*\n📊 Значение: *${value}* ${unit}\n📅 ${getTodayHumanDate()}\n\nПодтвердить?`,
+    { reply_markup: { inline_keyboard: [
+      [{ text: "🟢 Подтвердить", callback_data: `fact_confirm:${taskId}:${valEnc}` }],
+      [{ text: "🔴 Отмена", callback_data: "fact_cancel" }],
+    ]} });
+}
+
+/** Fact wizard step 4: save + final status */
+async function factWizardSave(chatId: number, from: any, taskId: number, value: number, msgId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+  const today = getTodayIsoDate();
+
+  const { data: task } = await supabase
+    .from("task_instances").select("id, task_templates(name, unit)").eq("id", taskId).maybeSingle();
+  const taskName = getTaskName(task);
+  const unit = task?.task_templates?.unit || "ед.";
+
+  // Upsert DailyWorkLog
+  const { data: existing } = await supabase
+    .from("daily_work_logs").select("id, plan_day").eq("task_instance_id", taskId).eq("date", today).maybeSingle();
+
+  if (existing) {
+    const plan = Number(existing.plan_day || 0);
+    await supabase.from("daily_work_logs").update({
+      fact_day: value, deviation: value - plan, pct_day: plan > 0 ? (value / plan) * 100 : null, updated_at: new Date().toISOString(),
+    }).eq("id", existing.id);
+  } else {
+    await supabase.from("daily_work_logs").insert({
+      task_instance_id: taskId, date: today,
+      day_of_week: ["ВС","ПН","ВТ","СР","ЧТ","ПТ","СБ"][new Date().getDay()],
+      fact_day: value, plan_day: 0, deviation: value, status: "DRAFT", created_by: user.id,
+    });
+  }
+
+  // Recalculate accumulations
+  const { data: allLogs } = await supabase
+    .from("daily_work_logs").select("fact_day, plan_day").eq("task_instance_id", taskId).lte("date", today);
+  let accFact = value;
+  if (allLogs) {
+    accFact = allLogs.reduce((s: number, l: any) => s + Number(l.fact_day || 0), 0);
+    const accPlan = allLogs.reduce((s: number, l: any) => s + Number(l.plan_day || 0), 0);
+    await supabase.from("task_instances").update({
+      actual_volume: accFact, completion_pct: accPlan > 0 ? Math.min((accFact / accPlan) * 100, 100) : 0,
+    }).eq("id", taskId);
+  }
+
+  await supabase.from("audit_logs").insert({
+    action: "FACT_ENTERED", entity_type: "DailyWorkLog", user_id: user.id,
+    new_value: { task_id: taskId, date: today, fact_day: value, acc_fact: accFact },
   });
+
+  clearWizard(chatId);
+
+  // Final status — clean, no keyboard
+  await editMessage(chatId, msgId,
+    `✔️ *Факт записан*\n\n📋 ${taskName}\n📊 ${value} ${unit}\n📈 Накопл.: ${accFact.toFixed(1)} ${unit}\n📅 ${getTodayHumanDate()}`);
 }
 
 async function handleDefect(chatId: number, from: any) {
@@ -1417,28 +1509,34 @@ async function handleRoleAction(chatId: number, from: any, action: string) {
 // ===========================
 async function handleCallback(callbackQuery: any) {
   const chatId = callbackQuery.message?.chat?.id;
+  const msgId = callbackQuery.message?.message_id;
   const data = callbackQuery.data;
   const from = callbackQuery.from;
 
   await answerCallback(callbackQuery.id);
 
   if (!chatId || !data) return;
+
+  // Clear wizard if user navigates away from fact flow
   const parsedAction = parseCallbackAction(data);
+  if (!["fact_select", "fact_confirm", "fact_cancel"].includes(parsedAction.type)) {
+    clearWizard(chatId);
+  }
 
   switch (parsedAction.type) {
     case "my_tasks":
-      await handleTasks(chatId, from);
+      await handleTasks(chatId, from, "all", msgId);
       break;
     case "my_tasks_filter":
-      await handleTasks(chatId, from, parsedAction.filter);
+      await handleTasks(chatId, from, parsedAction.filter, msgId);
       break;
     case "main_menu": {
       const user = await getUser(from.id);
-      if (user && user.status === "ACTIVE") await sendMainMenu(chatId, user);
+      if (user && user.status === "ACTIVE") await sendMainMenu(chatId, user, msgId);
       break;
     }
     case "enter_fact":
-      await handleFact(chatId, from);
+      await handleFact(chatId, from, msgId);
       break;
     case "report_defect":
       await handleDefect(chatId, from);
@@ -1450,31 +1548,29 @@ async function handleCallback(callbackQuery: any) {
       await handleRoleAction(chatId, from, parsedAction.action);
       break;
     case "task_detail":
-      await handleTaskDetail(chatId, from, parsedAction.taskId);
+      await handleTaskDetail(chatId, from, parsedAction.taskId, msgId);
       break;
     case "task_done":
-      await handleTaskDone(chatId, from, parsedAction.taskId);
+      await handleTaskDone(chatId, from, parsedAction.taskId, msgId);
       break;
     case "task_verify":
-      await handleTaskVerify(chatId, from, parsedAction.taskId);
+      await handleTaskVerify(chatId, from, parsedAction.taskId, msgId);
       break;
     case "task_block":
-      await handleTaskBlock(chatId, from, parsedAction.taskId);
+      await handleTaskBlock(chatId, from, parsedAction.taskId, msgId);
       break;
     case "task_unblock":
-      await handleTaskUnblock(chatId, from, parsedAction.taskId);
+      await handleTaskUnblock(chatId, from, parsedAction.taskId, msgId);
       break;
     case "fact_select":
-      await sendMiniAppButton(
-        chatId,
-        `📝 Переход к вводу факта по задаче #${parsedAction.taskId}:`,
-        {
-          screen: "plan-fact",
-          taskId: parsedAction.taskId,
-          date: getTodayIsoDate(),
-          startapp: `task_${parsedAction.taskId}`,
-        },
-      );
+      await factWizardStep2(chatId, from, parsedAction.taskId, msgId);
+      break;
+    case "fact_confirm":
+      await factWizardSave(chatId, from, parsedAction.taskId, parsedAction.value, msgId);
+      break;
+    case "fact_cancel":
+      clearWizard(chatId);
+      await renderDone(chatId, msgId, "🔴 Ввод факта отменён.");
       break;
     case "defect_facade":
       await sendMiniAppButton(
@@ -1549,14 +1645,8 @@ async function handleCallback(callbackQuery: any) {
       });
 
       const acceptedName = getTaskName(taskToAccept) || `#${parsedAction.taskId}`;
-      await sendMessage(chatId, `▶ Задача «${acceptedName}» принята в работу.`, {
-        reply_markup: { inline_keyboard: [
-          [
-            { text: "📝 Ввести факт", callback_data: `fact_select:${parsedAction.taskId}` },
-            { text: "📋 Задачи", callback_data: "my_tasks" },
-          ],
-        ]},
-      });
+      await render(chatId, msgId, `🟢 Задача «${acceptedName}» принята в работу.`,
+        [[{ text: "🔵 Ввести факт", callback_data: `fact_select:${parsedAction.taskId}` }, { text: "🔵 Задачи", callback_data: "my_tasks" }]]);
       break;
     }
     case "accept_all": {
@@ -1611,11 +1701,8 @@ async function handleCallback(callbackQuery: any) {
         },
       });
 
-      await sendMessage(chatId, `✅ Пакетное принятие завершено.\nПринято: ${acceptedCount}\nПропущено: ${skippedCount}`, {
-        reply_markup: { inline_keyboard: [
-          [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
-        ]},
-      });
+      await render(chatId, msgId, `🟢 Принято: ${acceptedCount} | Пропущено: ${skippedCount}`,
+        [[{ text: "🔵 Задачи", callback_data: "my_tasks" }, { text: "🔵 Меню", callback_data: "main_menu" }]]);
       break;
     }
     case "setup_demo": {
@@ -1751,13 +1838,33 @@ serve(async (req: Request) => {
   try {
     const update = await req.json();
 
-    // Handle commands
+    // Handle text messages (commands + wizard text input)
     if (update.message?.text) {
       const chatId = update.message.chat.id;
       const text = update.message.text;
       const from = update.message.from;
+      const userMsgId = update.message.message_id;
       const [command, startArg] = text.trim().split(/\s+/, 2);
 
+      // Check active wizard (text input for fact value)
+      const wiz = getWizard(chatId);
+      if (wiz && wiz.step === "fact_await_value" && !text.startsWith("/")) {
+        const value = parseFloat(text.replace(",", "."));
+        if (isNaN(value) || value < 0) {
+          await editMessage(chatId, wiz.messageId,
+            `📝 *Ввод факта — Шаг 2/3*\n\n⚠️ Введите число >= 0\nПолучено: «${text}»`,
+            { reply_markup: { inline_keyboard: [[{ text: "🔴 Отмена", callback_data: "fact_cancel" }]] } });
+          await deleteMessage(chatId, userMsgId);
+        } else {
+          const { taskId, taskName, unit } = wiz.data;
+          clearWizard(chatId);
+          await deleteMessage(chatId, userMsgId);
+          await factWizardStep3(chatId, wiz.messageId, taskId, taskName, unit, value);
+        }
+        return new Response("OK", { status: 200 });
+      }
+
+      // Slash commands
       if (command === "/start") {
         await handleStart(chatId, from, startArg);
       } else if (command === "/help") {

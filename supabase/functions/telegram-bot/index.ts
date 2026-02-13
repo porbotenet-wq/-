@@ -752,35 +752,464 @@ async function handleApp(chatId: number, from: any, context?: MiniAppContext) {
   await sendMiniAppButton(chatId, "📱 Откройте Mini App STSphera:", context || { screen: "dashboard" });
 }
 
-async function handleTasks(chatId: number, from: any) {
+// ===========================
+// Screen 2: /tasks — full task list
+// ===========================
+const STATUS_ICON: Record<string, string> = {
+  CREATED: "⚪",
+  ASSIGNED: "🔵",
+  IN_PROGRESS: "🟢",
+  DONE: "✅",
+  VERIFIED: "✔️",
+  BLOCKED: "🔴",
+  CANCELLED: "⛔",
+};
+const STATUS_LABEL: Record<string, string> = {
+  CREATED: "Создана",
+  ASSIGNED: "Назначена",
+  IN_PROGRESS: "В работе",
+  DONE: "Выполнена",
+  VERIFIED: "Принята",
+  BLOCKED: "Блокирована",
+  CANCELLED: "Отменена",
+};
+const PRIORITY_ICON: Record<string, string> = {
+  HIGH: "🔴",
+  MEDIUM: "🟡",
+  LOW: "🟢",
+};
+
+type TaskFilter = "all" | "assigned" | "progress" | "overdue" | "done";
+
+async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all") {
   const user = await getUser(from.id);
   if (!user || user.status !== "ACTIVE") {
     await sendMessage(chatId, "Используйте /start для авторизации.");
     return;
   }
 
-  const { data: tasks } = await supabase
-    .from("task_instances")
-    .select("id, status, planned_end, priority, completion_pct, task_templates(name)")
-    .eq("assignee_id", user.id)
-    .in("status", ["ASSIGNED", "IN_PROGRESS"])
-    .order("planned_end", { ascending: true })
-    .limit(10);
+  const today = getTodayIsoDate();
 
+  // ---- Counts for header ----
+  const [
+    { count: assignedCount },
+    { count: progressCount },
+    { count: overdueCount },
+    { count: doneCount },
+  ] = await Promise.all([
+    supabase.from("task_instances").select("id", { count: "exact", head: true })
+      .eq("assignee_id", user.id).eq("status", "ASSIGNED"),
+    supabase.from("task_instances").select("id", { count: "exact", head: true })
+      .eq("assignee_id", user.id).eq("status", "IN_PROGRESS"),
+    supabase.from("task_instances").select("id", { count: "exact", head: true })
+      .eq("assignee_id", user.id).in("status", ["ASSIGNED", "IN_PROGRESS"]).lt("planned_end", today),
+    supabase.from("task_instances").select("id", { count: "exact", head: true })
+      .eq("assignee_id", user.id).in("status", ["DONE", "VERIFIED"]),
+  ]);
+
+  const ac = assignedCount || 0;
+  const pc = progressCount || 0;
+  const oc = overdueCount || 0;
+  const dc = doneCount || 0;
+  const totalActive = ac + pc;
+
+  // ---- Build status header ----
+  const headerLines = [
+    `📋 *Экран задач — ${getTodayHumanDate()}*`,
+    ``,
+    `🔵 Назначено: ${ac}  🟢 В работе: ${pc}`,
+  ];
+  if (oc > 0) headerLines.push(`🔴 Просрочено: ${oc}`);
+  headerLines.push(`✅ Завершено: ${dc}`);
+
+  // ---- Filter row ----
+  const filterLabels: Record<TaskFilter, string> = {
+    all: "Все активные",
+    assigned: `Назначенные (${ac})`,
+    progress: `В работе (${pc})`,
+    overdue: `Просроченные (${oc})`,
+    done: `Завершённые (${dc})`,
+  };
+  const activeFilter = filter;
+
+  // ---- Fetch task list ----
+  let query = supabase
+    .from("task_instances")
+    .select("id, status, planned_start, planned_end, priority, completion_pct, type, notes, facade_id, task_templates(name, code, phase, unit), facades(name)")
+    .eq("assignee_id", user.id)
+    .order("priority", { ascending: true })
+    .order("planned_end", { ascending: true })
+    .limit(15);
+
+  if (activeFilter === "assigned") {
+    query = query.eq("status", "ASSIGNED");
+  } else if (activeFilter === "progress") {
+    query = query.eq("status", "IN_PROGRESS");
+  } else if (activeFilter === "overdue") {
+    query = query.in("status", ["ASSIGNED", "IN_PROGRESS"]).lt("planned_end", today);
+  } else if (activeFilter === "done") {
+    query = query.in("status", ["DONE", "VERIFIED"]);
+  } else {
+    query = query.in("status", ["ASSIGNED", "IN_PROGRESS"]);
+  }
+
+  const { data: tasks } = await query;
+
+  // ---- Compose message body ----
   if (!tasks || tasks.length === 0) {
-    await sendMessage(chatId, "📋 У вас нет активных задач. ✅");
+    const emptyHint: Record<TaskFilter, string> = {
+      all: "Нет активных задач. Хорошая работа!",
+      assigned: "Нет назначенных задач.",
+      progress: "Нет задач в работе.",
+      overdue: "Просроченных задач нет — отлично!",
+      done: "Завершённых задач пока нет.",
+    };
+    await sendMessage(
+      chatId,
+      headerLines.join("\n") + `\n\n📎 Фильтр: *${filterLabels[activeFilter]}*\n\n${emptyHint[activeFilter]}`,
+      { reply_markup: { inline_keyboard: buildTaskFilterButtons(activeFilter, ac, pc, oc) } },
+    );
     return;
   }
 
-  const icons: Record<string, string> = { ASSIGNED: "🔵", IN_PROGRESS: "🟢" };
-  const lines = tasks.map((t: any, i: number) => {
+  const taskLines = tasks.map((t: any, i: number) => {
     const name = t.task_templates?.name || `Задача #${t.id}`;
-    return `${icons[t.status] || "⚪"} ${i + 1}. *${name}*\n   Срок: ${t.planned_end || "—"} | ${Number(t.completion_pct || 0).toFixed(0)}%`;
+    const code = t.task_templates?.code ? `\`${t.task_templates.code}\` ` : "";
+    const icon = STATUS_ICON[t.status] || "⚪";
+    const pi = PRIORITY_ICON[t.priority] || "";
+    const pct = Number(t.completion_pct || 0).toFixed(0);
+    const facade = t.facades?.name ? ` | ${t.facades.name}` : "";
+    const isOverdue = t.planned_end && t.planned_end < today && !["DONE", "VERIFIED", "CANCELLED"].includes(t.status);
+    const deadlineStr = t.planned_end || "—";
+    const overdueTag = isOverdue ? " ⚠️" : "";
+    const isDefect = t.type === "DEFECT";
+
+    return `${icon} *${i + 1}. ${isDefect ? "🔴 " : ""}${name}*\n   ${code}${pi} Срок: ${deadlineStr}${overdueTag} | ${pct}%${facade}`;
   });
 
-  await sendMessage(chatId, `📋 *Ваши задачи (${tasks.length}):*\n\n${lines.join("\n\n")}`);
-  await sendMiniAppButton(chatId, "Для полного просмотра откройте задачи в Mini App:", {
-    screen: "tasks",
+  const bodyText = headerLines.join("\n") +
+    `\n\n📎 Фильтр: *${filterLabels[activeFilter]}* (${tasks.length})\n\n` +
+    taskLines.join("\n\n");
+
+  // ---- Per-task action buttons ----
+  const taskButtons: any[][] = [];
+  for (const t of tasks.slice(0, 8)) {
+    const shortName = (t.task_templates?.name || `#${t.id}`).substring(0, 25);
+    const row: any[] = [];
+
+    row.push({ text: `🔎 ${shortName}`, callback_data: `task_detail:${t.id}` });
+
+    if (t.status === "ASSIGNED") {
+      row.push({ text: "▶ Принять", callback_data: `accept:task:${t.id}` });
+    } else if (t.status === "IN_PROGRESS") {
+      row.push({ text: "✅ Готово", callback_data: `task_done:${t.id}` });
+    }
+
+    taskButtons.push(row);
+  }
+
+  // Accept-all shortcut
+  const assignedTasks = tasks.filter((t: any) => t.status === "ASSIGNED");
+  if (assignedTasks.length > 1) {
+    const ids = assignedTasks.map((t: any) => t.id).join(",");
+    taskButtons.push([{ text: `✅ Принять все назначенные (${assignedTasks.length})`, callback_data: `accept_all:${ids}` }]);
+  }
+
+  // ---- Filter + nav buttons ----
+  const filterRow = buildTaskFilterButtons(activeFilter, ac, pc, oc);
+  const navRow = [
+    [{ text: "🔙 Меню", callback_data: "main_menu" }],
+  ];
+
+  const miniAppBtn = createMiniAppButton("📱 Задачи в Mini App", { screen: "tasks", startapp: "tasks" });
+  if (miniAppBtn) {
+    navRow[0].push(miniAppBtn);
+  }
+
+  const keyboard = [...taskButtons, ...filterRow, ...navRow];
+
+  await sendMessage(chatId, bodyText, { reply_markup: { inline_keyboard: keyboard } });
+}
+
+function buildTaskFilterButtons(active: TaskFilter, ac: number, pc: number, oc: number): any[][] {
+  const filters: Array<{ label: string; key: TaskFilter }> = [
+    { label: "Все", key: "all" },
+    { label: `🔵${ac}`, key: "assigned" },
+    { label: `🟢${pc}`, key: "progress" },
+  ];
+  if (oc > 0) filters.push({ label: `⚠️${oc}`, key: "overdue" });
+  filters.push({ label: "✅", key: "done" });
+
+  return [filters.map((f) => ({
+    text: f.key === active ? `[${f.label}]` : f.label,
+    callback_data: `my_tasks:${f.key}`,
+  }))];
+}
+
+// ===========================
+// Task detail card
+// ===========================
+async function handleTaskDetail(chatId: number, from: any, taskId: number) {
+  const user = await getUser(from.id);
+  if (!user || user.status !== "ACTIVE") {
+    await sendMessage(chatId, "Используйте /start для авторизации.");
+    return;
+  }
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("*, task_templates(name, code, phase, unit, duration_days), facades(name), users!task_instances_assignee_id_fkey(first_name, last_name)")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) {
+    await sendMessage(chatId, "❌ Задача не найдена.");
+    return;
+  }
+
+  const today = getTodayIsoDate();
+  const name = task.task_templates?.name || `Задача #${task.id}`;
+  const code = task.task_templates?.code || "—";
+  const phase = task.task_templates?.phase || "—";
+  const unit = task.task_templates?.unit || "ед.";
+  const facade = task.facades?.name || "—";
+  const assignee = task.users
+    ? `${task.users.first_name || ""} ${task.users.last_name || ""}`.trim() || "—"
+    : "не назначен";
+  const pct = Number(task.completion_pct || 0).toFixed(0);
+  const statusIcon = STATUS_ICON[task.status] || "⚪";
+  const statusLabel = STATUS_LABEL[task.status] || task.status;
+  const pi = PRIORITY_ICON[task.priority] || "";
+  const isOverdue = task.planned_end && task.planned_end < today && !["DONE", "VERIFIED", "CANCELLED"].includes(task.status);
+  const isDefect = task.type === "DEFECT";
+  const daysOverdue = isOverdue ? Math.ceil((Date.now() - new Date(task.planned_end).getTime()) / 86400000) : 0;
+
+  // Progress bar (10 chars)
+  const filledBlocks = Math.round(Number(pct) / 10);
+  const progressBar = "▓".repeat(filledBlocks) + "░".repeat(10 - filledBlocks);
+
+  let text = `${statusIcon} *${isDefect ? "ДЕФЕКТ: " : ""}${name}*\n\n`;
+  text += `📌 Код: \`${code}\`\n`;
+  text += `📊 Статус: ${statusLabel}\n`;
+  text += `${pi} Приоритет: ${task.priority}\n`;
+  text += `📁 Фаза: ${phase}\n`;
+  text += `🏢 Фасад: ${facade}\n`;
+  text += `👤 Исполнитель: ${assignee}\n`;
+  text += `\n📅 План: ${task.planned_start || "—"} → ${task.planned_end || "—"}\n`;
+  if (task.actual_start) text += `📅 Факт начало: ${task.actual_start}\n`;
+  if (task.actual_end) text += `📅 Факт конец: ${task.actual_end}\n`;
+  text += `\n📈 Прогресс: ${pct}%\n\`${progressBar}\`\n`;
+  if (task.actual_volume || task.planned_volume) {
+    text += `📦 Объём: ${Number(task.actual_volume || 0).toFixed(1)} / ${Number(task.planned_volume || 0).toFixed(1)} ${unit}\n`;
+  }
+  if (isOverdue) {
+    text += `\n⚠️ *Просрочка: ${daysOverdue} дн.*\n`;
+  }
+  if (task.notes) {
+    text += `\n📝 Примечание: ${task.notes.substring(0, 200)}\n`;
+  }
+
+  // ---- Action buttons ----
+  const buttons: any[][] = [];
+  const isMyTask = task.assignee_id === user.id;
+
+  if (task.status === "ASSIGNED" && isMyTask) {
+    buttons.push([{ text: "▶ Принять в работу", callback_data: `accept:task:${task.id}` }]);
+  }
+  if (task.status === "IN_PROGRESS" && isMyTask) {
+    buttons.push([
+      { text: "✅ Завершить", callback_data: `task_done:${task.id}` },
+      { text: "🔴 Блокировать", callback_data: `task_block:${task.id}` },
+    ]);
+    buttons.push([{ text: "📝 Ввести факт", callback_data: `fact_select:${task.id}` }]);
+  }
+  if (task.status === "DONE") {
+    const resolved = resolveUserRole(user);
+    if (resolved.isAdmin || resolved.systemName === "site_manager") {
+      buttons.push([{ text: "✔️ Верифицировать", callback_data: `task_verify:${task.id}` }]);
+    }
+  }
+  if (task.status === "BLOCKED" && isMyTask) {
+    buttons.push([{ text: "🔓 Разблокировать", callback_data: `task_unblock:${task.id}` }]);
+  }
+
+  const miniAppBtn = createMiniAppButton("📱 В Mini App", { screen: "tasks", taskId: task.id, startapp: `task_${task.id}` });
+  const backRow: any[] = [{ text: "🔙 К списку", callback_data: "my_tasks" }];
+  if (miniAppBtn) backRow.push(miniAppBtn);
+  buttons.push(backRow);
+
+  await sendMessage(chatId, text, { reply_markup: { inline_keyboard: buttons } });
+}
+
+// ===========================
+// Task state transitions with guards
+// ===========================
+async function handleTaskDone(chatId: number, from: any, taskId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("id, status, assignee_id, task_templates(name)")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) {
+    await sendMessage(chatId, "❌ Задача не найдена.");
+    return;
+  }
+  if (task.status !== "IN_PROGRESS") {
+    await sendMessage(chatId, `⚠️ Задача в статусе *${STATUS_LABEL[task.status] || task.status}* — завершить можно только из статуса «В работе».`);
+    return;
+  }
+  if (task.assignee_id !== user.id) {
+    await sendMessage(chatId, "⚠️ Можно завершить только свою задачу.");
+    return;
+  }
+
+  await supabase.from("task_instances").update({
+    status: "DONE",
+    actual_end: getTodayIsoDate(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId);
+
+  await supabase.from("audit_logs").insert({
+    action: "TASK_STATUS_CHANGED",
+    entity_type: "TaskInstance",
+    entity_id: taskId,
+    user_id: user.id,
+    old_value: { status: "IN_PROGRESS" },
+    new_value: { status: "DONE" },
+  });
+
+  const taskName = task.task_templates?.name || `#${taskId}`;
+  await sendMessage(chatId, `✅ Задача «${taskName}» завершена.\nОжидает верификации.`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
+    ]},
+  });
+}
+
+async function handleTaskVerify(chatId: number, from: any, taskId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+
+  const resolved = resolveUserRole(user);
+  if (!resolved.isAdmin && resolved.systemName !== "site_manager") {
+    await sendMessage(chatId, "⚠️ Верификация доступна только начальнику участка или руководителю.");
+    return;
+  }
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("id, status, task_templates(name)")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) { await sendMessage(chatId, "❌ Задача не найдена."); return; }
+  if (task.status !== "DONE") {
+    await sendMessage(chatId, `⚠️ Задача в статусе «${STATUS_LABEL[task.status] || task.status}» — верифицировать можно только завершённые.`);
+    return;
+  }
+
+  await supabase.from("task_instances").update({
+    status: "VERIFIED",
+    reviewer_id: user.id,
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId);
+
+  await supabase.from("audit_logs").insert({
+    action: "TASK_STATUS_CHANGED",
+    entity_type: "TaskInstance",
+    entity_id: taskId,
+    user_id: user.id,
+    old_value: { status: "DONE" },
+    new_value: { status: "VERIFIED" },
+  });
+
+  const taskName = task.task_templates?.name || `#${taskId}`;
+  await sendMessage(chatId, `✔️ Задача «${taskName}» верифицирована.`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: "📋 Задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
+    ]},
+  });
+}
+
+async function handleTaskBlock(chatId: number, from: any, taskId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("id, status, assignee_id, task_templates(name)")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) { await sendMessage(chatId, "❌ Задача не найдена."); return; }
+  if (!["ASSIGNED", "IN_PROGRESS"].includes(task.status)) {
+    await sendMessage(chatId, "⚠️ Блокировка доступна только для назначенных/активных задач.");
+    return;
+  }
+
+  const prevStatus = task.status;
+  await supabase.from("task_instances").update({
+    status: "BLOCKED",
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId);
+
+  await supabase.from("audit_logs").insert({
+    action: "TASK_STATUS_CHANGED",
+    entity_type: "TaskInstance",
+    entity_id: taskId,
+    user_id: user.id,
+    old_value: { status: prevStatus },
+    new_value: { status: "BLOCKED" },
+  });
+
+  const taskName = task.task_templates?.name || `#${taskId}`;
+  await sendMessage(chatId, `🔴 Задача «${taskName}» заблокирована.`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: "🔓 Разблокировать", callback_data: `task_unblock:${taskId}` }],
+      [{ text: "📋 Задачи", callback_data: "my_tasks" }],
+    ]},
+  });
+}
+
+async function handleTaskUnblock(chatId: number, from: any, taskId: number) {
+  const user = await getUser(from.id);
+  if (!user) return;
+
+  const { data: task } = await supabase
+    .from("task_instances")
+    .select("id, status, task_templates(name)")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) { await sendMessage(chatId, "❌ Задача не найдена."); return; }
+  if (task.status !== "BLOCKED") {
+    await sendMessage(chatId, "⚠️ Задача не заблокирована.");
+    return;
+  }
+
+  await supabase.from("task_instances").update({
+    status: "IN_PROGRESS",
+    updated_at: new Date().toISOString(),
+  }).eq("id", taskId);
+
+  await supabase.from("audit_logs").insert({
+    action: "TASK_STATUS_CHANGED",
+    entity_type: "TaskInstance",
+    entity_id: taskId,
+    user_id: user.id,
+    old_value: { status: "BLOCKED" },
+    new_value: { status: "IN_PROGRESS" },
+  });
+
+  const taskName = task.task_templates?.name || `#${taskId}`;
+  await sendMessage(chatId, `🔓 Задача «${taskName}» разблокирована → В работе.`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: "📋 Задачи", callback_data: "my_tasks" }],
+    ]},
   });
 }
 
@@ -953,6 +1382,14 @@ async function handleCallback(callbackQuery: any) {
     case "my_tasks":
       await handleTasks(chatId, from);
       break;
+    case "my_tasks_filter":
+      await handleTasks(chatId, from, parsedAction.filter);
+      break;
+    case "main_menu": {
+      const user = await getUser(from.id);
+      if (user && user.status === "ACTIVE") await sendMainMenu(chatId, user);
+      break;
+    }
     case "enter_fact":
       await handleFact(chatId, from);
       break;
@@ -964,6 +1401,21 @@ async function handleCallback(callbackQuery: any) {
       break;
     case "role_action":
       await handleRoleAction(chatId, from, parsedAction.action);
+      break;
+    case "task_detail":
+      await handleTaskDetail(chatId, from, parsedAction.taskId);
+      break;
+    case "task_done":
+      await handleTaskDone(chatId, from, parsedAction.taskId);
+      break;
+    case "task_verify":
+      await handleTaskVerify(chatId, from, parsedAction.taskId);
+      break;
+    case "task_block":
+      await handleTaskBlock(chatId, from, parsedAction.taskId);
+      break;
+    case "task_unblock":
+      await handleTaskUnblock(chatId, from, parsedAction.taskId);
       break;
     case "fact_select":
       await sendMiniAppButton(
@@ -1000,11 +1452,31 @@ async function handleCallback(callbackQuery: any) {
       const user = await getUser(from.id);
       if (!user) return;
 
+      const { data: taskToAccept } = await supabase
+        .from("task_instances")
+        .select("id, status, assignee_id, task_templates(name)")
+        .eq("id", parsedAction.taskId)
+        .maybeSingle();
+
+      if (!taskToAccept) {
+        await sendMessage(chatId, "❌ Задача не найдена.");
+        break;
+      }
+      if (taskToAccept.status !== "ASSIGNED") {
+        await sendMessage(chatId, `⚠️ Задача уже в статусе «${STATUS_LABEL[taskToAccept.status] || taskToAccept.status}».`);
+        break;
+      }
+      if (taskToAccept.assignee_id !== user.id) {
+        await sendMessage(chatId, "⚠️ Эта задача назначена другому пользователю.");
+        break;
+      }
+
       await supabase
         .from("task_instances")
         .update({
           status: "IN_PROGRESS",
-          actual_start: new Date().toISOString().split("T")[0],
+          actual_start: getTodayIsoDate(),
+          updated_at: new Date().toISOString(),
         })
         .eq("id", parsedAction.taskId);
 
@@ -1017,22 +1489,34 @@ async function handleCallback(callbackQuery: any) {
         new_value: { status: "IN_PROGRESS" },
       });
 
-      await sendMessage(chatId, "✅ Задача принята в работу!");
+      const acceptedName = taskToAccept.task_templates?.name || `#${parsedAction.taskId}`;
+      await sendMessage(chatId, `▶ Задача «${acceptedName}» принята в работу.`, {
+        reply_markup: { inline_keyboard: [
+          [
+            { text: "📝 Ввести факт", callback_data: `fact_select:${parsedAction.taskId}` },
+            { text: "📋 Задачи", callback_data: "my_tasks" },
+          ],
+        ]},
+      });
       break;
     }
     case "accept_all": {
       const user = await getUser(from.id);
       if (!user) return;
 
+      let accepted = 0;
       for (const taskId of parsedAction.taskIds) {
-        await supabase
+        const { error } = await supabase
           .from("task_instances")
           .update({
             status: "IN_PROGRESS",
-            actual_start: new Date().toISOString().split("T")[0],
+            actual_start: getTodayIsoDate(),
+            updated_at: new Date().toISOString(),
           })
           .eq("id", taskId)
-          .eq("assignee_id", user.id);
+          .eq("assignee_id", user.id)
+          .eq("status", "ASSIGNED");
+        if (!error) accepted++;
       }
 
       await supabase.from("audit_logs").insert({
@@ -1041,14 +1525,15 @@ async function handleCallback(callbackQuery: any) {
         user_id: user.id,
         new_value: {
           task_ids: parsedAction.taskIds,
-          count: parsedAction.taskIds.length,
+          count: accepted,
         },
       });
 
-      await sendMessage(
-        chatId,
-        `✅ Принято задач: ${parsedAction.taskIds.length}. Все в работе!`,
-      );
+      await sendMessage(chatId, `✅ Принято задач: ${accepted}. Все в работе!`, {
+        reply_markup: { inline_keyboard: [
+          [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
+        ]},
+      });
       break;
     }
     case "setup_demo": {

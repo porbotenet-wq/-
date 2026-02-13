@@ -201,6 +201,44 @@ function normalizeStartParam(rawStartParam?: string): string | null {
   return trimmed;
 }
 
+function relationItem(value: any): any {
+  if (Array.isArray(value)) {
+    return value[0] || null;
+  }
+  return value || null;
+}
+
+function getTaskTemplate(task: any): any {
+  return relationItem(task?.task_templates);
+}
+
+function getTaskFacade(task: any): any {
+  return relationItem(task?.facades);
+}
+
+function getTaskName(task: any): string {
+  const template = getTaskTemplate(task);
+  return template?.name || `Задача #${task?.id || "—"}`;
+}
+
+function buildAcceptAllCallback(taskIds: number[]): string | null {
+  const uniqueIds = Array.from(
+    new Set(taskIds.filter((id) => Number.isInteger(id) && id > 0)),
+  );
+  if (uniqueIds.length < 2) return null;
+
+  const acceptedIds: number[] = [];
+  for (const id of uniqueIds) {
+    const candidate = [...acceptedIds, id];
+    const callbackData = `accept_all:${candidate.join(",")}`;
+    if (callbackData.length > 64) break;
+    acceptedIds.push(id);
+  }
+
+  if (acceptedIds.length < 2) return null;
+  return `accept_all:${acceptedIds.join(",")}`;
+}
+
 function roleMenuRows(roleSystemName: string, isAdmin: boolean): RoleMenuItem[][] {
   const rowsByRole: Record<string, RoleMenuItem[][]> = {
     ceo: [
@@ -873,12 +911,14 @@ async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all"
   }
 
   const taskLines = tasks.map((t: any, i: number) => {
-    const name = t.task_templates?.name || `Задача #${t.id}`;
-    const code = t.task_templates?.code ? `\`${t.task_templates.code}\` ` : "";
+    const template = getTaskTemplate(t);
+    const facadeRow = getTaskFacade(t);
+    const name = template?.name || `Задача #${t.id}`;
+    const code = template?.code ? `\`${template.code}\` ` : "";
     const icon = STATUS_ICON[t.status] || "⚪";
     const pi = PRIORITY_ICON[t.priority] || "";
     const pct = Number(t.completion_pct || 0).toFixed(0);
-    const facade = t.facades?.name ? ` | ${t.facades.name}` : "";
+    const facade = facadeRow?.name ? ` | ${facadeRow.name}` : "";
     const isOverdue = t.planned_end && t.planned_end < today && !["DONE", "VERIFIED", "CANCELLED"].includes(t.status);
     const deadlineStr = t.planned_end || "—";
     const overdueTag = isOverdue ? " ⚠️" : "";
@@ -894,7 +934,7 @@ async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all"
   // ---- Per-task action buttons ----
   const taskButtons: any[][] = [];
   for (const t of tasks.slice(0, 8)) {
-    const shortName = (t.task_templates?.name || `#${t.id}`).substring(0, 25);
+    const shortName = (getTaskName(t) || `#${t.id}`).substring(0, 25);
     const row: any[] = [];
 
     row.push({ text: `🔎 ${shortName}`, callback_data: `task_detail:${t.id}` });
@@ -910,9 +950,14 @@ async function handleTasks(chatId: number, from: any, filter: TaskFilter = "all"
 
   // Accept-all shortcut
   const assignedTasks = tasks.filter((t: any) => t.status === "ASSIGNED");
-  if (assignedTasks.length > 1) {
-    const ids = assignedTasks.map((t: any) => t.id).join(",");
-    taskButtons.push([{ text: `✅ Принять все назначенные (${assignedTasks.length})`, callback_data: `accept_all:${ids}` }]);
+  const acceptAllCallback = buildAcceptAllCallback(
+    assignedTasks.map((t: any) => Number(t.id)),
+  );
+  if (acceptAllCallback) {
+    taskButtons.push([{
+      text: `✅ Принять все назначенные (${assignedTasks.length})`,
+      callback_data: acceptAllCallback,
+    }]);
   }
 
   // ---- Filter + nav buttons ----
@@ -968,11 +1013,13 @@ async function handleTaskDetail(chatId: number, from: any, taskId: number) {
   }
 
   const today = getTodayIsoDate();
-  const name = task.task_templates?.name || `Задача #${task.id}`;
-  const code = task.task_templates?.code || "—";
-  const phase = task.task_templates?.phase || "—";
-  const unit = task.task_templates?.unit || "ед.";
-  const facade = task.facades?.name || "—";
+  const template = getTaskTemplate(task);
+  const facadeRow = getTaskFacade(task);
+  const name = template?.name || `Задача #${task.id}`;
+  const code = template?.code || "—";
+  const phase = template?.phase || "—";
+  const unit = template?.unit || "ед.";
+  const facade = facadeRow?.name || "—";
   const assignee = task.users
     ? `${task.users.first_name || ""} ${task.users.last_name || ""}`.trim() || "—"
     : "не назначен";
@@ -1082,7 +1129,7 @@ async function handleTaskDone(chatId: number, from: any, taskId: number) {
     new_value: { status: "DONE" },
   });
 
-  const taskName = task.task_templates?.name || `#${taskId}`;
+  const taskName = getTaskName(task) || `#${taskId}`;
   await sendMessage(chatId, `✅ Задача «${taskName}» завершена.\nОжидает верификации.`, {
     reply_markup: { inline_keyboard: [
       [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
@@ -1127,7 +1174,7 @@ async function handleTaskVerify(chatId: number, from: any, taskId: number) {
     new_value: { status: "VERIFIED" },
   });
 
-  const taskName = task.task_templates?.name || `#${taskId}`;
+  const taskName = getTaskName(task) || `#${taskId}`;
   await sendMessage(chatId, `✔️ Задача «${taskName}» верифицирована.`, {
     reply_markup: { inline_keyboard: [
       [{ text: "📋 Задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
@@ -1166,7 +1213,7 @@ async function handleTaskBlock(chatId: number, from: any, taskId: number) {
     new_value: { status: "BLOCKED" },
   });
 
-  const taskName = task.task_templates?.name || `#${taskId}`;
+  const taskName = getTaskName(task) || `#${taskId}`;
   await sendMessage(chatId, `🔴 Задача «${taskName}» заблокирована.`, {
     reply_markup: { inline_keyboard: [
       [{ text: "🔓 Разблокировать", callback_data: `task_unblock:${taskId}` }],
@@ -1205,7 +1252,7 @@ async function handleTaskUnblock(chatId: number, from: any, taskId: number) {
     new_value: { status: "IN_PROGRESS" },
   });
 
-  const taskName = task.task_templates?.name || `#${taskId}`;
+  const taskName = getTaskName(task) || `#${taskId}`;
   await sendMessage(chatId, `🔓 Задача «${taskName}» разблокирована → В работе.`, {
     reply_markup: { inline_keyboard: [
       [{ text: "📋 Задачи", callback_data: "my_tasks" }],
@@ -1238,7 +1285,7 @@ async function handleFact(chatId: number, from: any) {
   }
 
   const buttons = tasks.map((t: any) => [{
-    text: (t.task_templates?.name || `Задача #${t.id}`).substring(0, 40),
+    text: getTaskName(t).substring(0, 40),
     callback_data: `fact_select:${t.id}`,
   }]);
 
@@ -1450,35 +1497,47 @@ async function handleCallback(callbackQuery: any) {
     }
     case "accept_task": {
       const user = await getUser(from.id);
-      if (!user) return;
+      if (!user || user.status !== "ACTIVE") {
+        await sendMessage(chatId, "Используйте /start для авторизации.");
+        return;
+      }
 
-      const { data: taskToAccept } = await supabase
+      const { data: taskToAccept, error: taskError } = await supabase
         .from("task_instances")
         .select("id, status, assignee_id, task_templates(name)")
         .eq("id", parsedAction.taskId)
         .maybeSingle();
 
-      if (!taskToAccept) {
+      if (taskError || !taskToAccept) {
         await sendMessage(chatId, "❌ Задача не найдена.");
-        break;
+        return;
       }
       if (taskToAccept.status !== "ASSIGNED") {
         await sendMessage(chatId, `⚠️ Задача уже в статусе «${STATUS_LABEL[taskToAccept.status] || taskToAccept.status}».`);
-        break;
+        return;
       }
       if (taskToAccept.assignee_id !== user.id) {
         await sendMessage(chatId, "⚠️ Эта задача назначена другому пользователю.");
-        break;
+        return;
       }
 
-      await supabase
+      const { data: updatedTask, error: updateError } = await supabase
         .from("task_instances")
         .update({
           status: "IN_PROGRESS",
           actual_start: getTodayIsoDate(),
           updated_at: new Date().toISOString(),
         })
-        .eq("id", parsedAction.taskId);
+        .eq("id", parsedAction.taskId)
+        .eq("assignee_id", user.id)
+        .eq("status", "ASSIGNED")
+        .select("id")
+        .maybeSingle();
+
+      if (updateError || !updatedTask) {
+        await sendMessage(chatId, "⚠️ Не удалось принять задачу. Обновите экран /tasks.");
+        return;
+      }
 
       await supabase.from("audit_logs").insert({
         action: "TASK_STATUS_CHANGED",
@@ -1489,7 +1548,7 @@ async function handleCallback(callbackQuery: any) {
         new_value: { status: "IN_PROGRESS" },
       });
 
-      const acceptedName = taskToAccept.task_templates?.name || `#${parsedAction.taskId}`;
+      const acceptedName = getTaskName(taskToAccept) || `#${parsedAction.taskId}`;
       await sendMessage(chatId, `▶ Задача «${acceptedName}» принята в работу.`, {
         reply_markup: { inline_keyboard: [
           [
@@ -1502,34 +1561,57 @@ async function handleCallback(callbackQuery: any) {
     }
     case "accept_all": {
       const user = await getUser(from.id);
-      if (!user) return;
-
-      let accepted = 0;
-      for (const taskId of parsedAction.taskIds) {
-        const { error } = await supabase
-          .from("task_instances")
-          .update({
-            status: "IN_PROGRESS",
-            actual_start: getTodayIsoDate(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", taskId)
-          .eq("assignee_id", user.id)
-          .eq("status", "ASSIGNED");
-        if (!error) accepted++;
+      if (!user || user.status !== "ACTIVE") {
+        await sendMessage(chatId, "Используйте /start для авторизации.");
+        return;
       }
+
+      const uniqueTaskIds = Array.from(
+        new Set(
+          parsedAction.taskIds
+            .map((taskId) => Number(taskId))
+            .filter((taskId) => Number.isInteger(taskId) && taskId > 0),
+        ),
+      );
+
+      if (uniqueTaskIds.length === 0) {
+        await sendMessage(chatId, "ℹ️ Нет задач для пакетного принятия.");
+        return;
+      }
+
+      const { data: acceptedTasks, error: bulkAcceptError } = await supabase
+        .from("task_instances")
+        .update({
+          status: "IN_PROGRESS",
+          actual_start: getTodayIsoDate(),
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", uniqueTaskIds)
+        .eq("assignee_id", user.id)
+        .eq("status", "ASSIGNED")
+        .select("id");
+
+      if (bulkAcceptError) {
+        console.error("Bulk accept failed:", bulkAcceptError);
+        await sendMessage(chatId, "❌ Ошибка пакетного принятия. Попробуйте ещё раз.");
+        return;
+      }
+
+      const acceptedCount = acceptedTasks?.length || 0;
+      const skippedCount = uniqueTaskIds.length - acceptedCount;
 
       await supabase.from("audit_logs").insert({
         action: "TASKS_ACCEPTED_BULK",
         entity_type: "TaskInstance",
         user_id: user.id,
         new_value: {
-          task_ids: parsedAction.taskIds,
-          count: accepted,
+          requested_task_ids: uniqueTaskIds,
+          accepted_count: acceptedCount,
+          skipped_count: skippedCount,
         },
       });
 
-      await sendMessage(chatId, `✅ Принято задач: ${accepted}. Все в работе!`, {
+      await sendMessage(chatId, `✅ Пакетное принятие завершено.\nПринято: ${acceptedCount}\nПропущено: ${skippedCount}`, {
         reply_markup: { inline_keyboard: [
           [{ text: "📋 Мои задачи", callback_data: "my_tasks" }, { text: "🔙 Меню", callback_data: "main_menu" }],
         ]},

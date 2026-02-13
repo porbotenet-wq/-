@@ -19,7 +19,7 @@ import {
 
 export default function App() {
   const { user: tgUser, startParam, isInTelegram } = useTelegram();
-  const { loadUser, loadProject, user } = useAppStore();
+  const { loadUser, loadProject, user, userLoaded } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [screenContract, setScreenContract] = useState<RoleScreenContract | null>(null);
@@ -66,12 +66,28 @@ export default function App() {
     }
   }, [user, screenContract, location.pathname, navigate]);
 
-  if (!user) {
+  if (!userLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="text-4xl mb-4">🏗</div>
           <div className="text-lg text-tg-hint">Загрузка STSphera...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen px-6">
+        <div className="text-center max-w-sm">
+          <div className="text-4xl mb-4">🔐</div>
+          <div className="text-lg font-medium mb-2">Профиль не найден</div>
+          <div className="text-sm text-tg-hint">
+            {isInTelegram
+              ? 'Вернитесь в бот, отправьте /start и попробуйте открыть Mini App снова.'
+              : 'Для входа откройте приложение из Telegram-бота STSphera.'}
+          </div>
         </div>
       </div>
     );

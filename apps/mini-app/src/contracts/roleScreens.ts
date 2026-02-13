@@ -42,10 +42,14 @@ const FALLBACK_CONTRACT: RoleScreenContract = {
 };
 
 let contractPromise: Promise<RoleScreenContract> | null = null;
-const CONTRACT_URL = new URL(
-  'contracts/role-screen-contracts.json',
-  import.meta.env.BASE_URL,
-).toString();
+
+function resolveContractUrl(): string {
+  const baseUrl = import.meta.env.BASE_URL || '/';
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}contracts/role-screen-contracts.json`;
+}
+
+const CONTRACT_URL = resolveContractUrl();
 
 export async function loadRoleScreenContract(): Promise<RoleScreenContract> {
   if (!contractPromise) {

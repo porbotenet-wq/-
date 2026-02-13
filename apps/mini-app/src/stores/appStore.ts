@@ -3,6 +3,7 @@ import { supabase } from '../api/supabase';
 
 interface AppState {
   user: any | null;
+  userLoaded: boolean;
   project: any | null;
   facades: any[];
   tasks: any[];
@@ -18,6 +19,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   user: null,
+  userLoaded: false,
   project: null,
   facades: [],
   tasks: [],
@@ -25,13 +27,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
 
   loadUser: async (telegramId: number) => {
-    set({ loading: true });
-    const { data } = await supabase
-      .from('users')
-      .select('*, user_roles!user_roles_user_id_fkey(*, roles(*))')
-      .eq('telegram_id', telegramId)
-      .maybeSingle();
-    set({ user: data, loading: false });
+    set({ loading: true, userLoaded: false });
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('*, user_roles!user_roles_user_id_fkey(*, roles(*))')
+        .eq('telegram_id', telegramId)
+        .maybeSingle();
+      set({ user: data, userLoaded: true, loading: false });
+    } catch (_error) {
+      set({ user: null, userLoaded: true, loading: false });
+    }
   },
 
   loadProject: async () => {
